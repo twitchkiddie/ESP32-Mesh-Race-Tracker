@@ -855,13 +855,27 @@ async function autoRoute() {
   try {
     // Ask Overpass for river/canal/stream centrelines with node geometry
     const query =
-      `[out:json][timeout:20];`+
+      `[out:json][timeout:25];`+
       `(way["waterway"~"^(river|canal|stream|tidal_channel)$"](${minLat},${minLon},${maxLat},${maxLon}););`+
       `out geom;`;
 
-    const res = await fetch('https://overpass-api.de/api/interpreter',
-                            { method:'POST', body:query });
-    if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+    // Try mirrors in order — overpass-api.de is the main server but can 504 under load
+    const MIRRORS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ];
+    let res, lastErr;
+    for (const url of MIRRORS) {
+      try {
+        res = await fetch(url, { method:'POST', body:query });
+        if (res.ok) break;
+        lastErr = `HTTP ${res.status} from ${url}`;
+      } catch(e) {
+        lastErr = `${e.message} (${url})`;
+      }
+    }
+    if (!res || !res.ok) throw new Error(lastErr || 'All Overpass mirrors failed');
     const data = await res.json();
 
     if (!data.elements || data.elements.length === 0) {
@@ -914,7 +928,8 @@ async function autoRoute() {
       `Auto-routed: ${draft.wps.length} waypoints placed along waterway — Save when happy.`;
 
   } catch(e) {
-    alert('Auto-route failed: ' + e.message);
+    alert('Auto-route failed: ' + e.message +
+          '\n\nThe free OpenStreetMap routing service may be busy — try again in a moment.');
   } finally {
     btn.textContent = '🌊 Auto-route'; btn.disabled = false;
   }
