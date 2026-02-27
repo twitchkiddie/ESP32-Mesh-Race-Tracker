@@ -6,74 +6,102 @@
 
 bool GpsHandler::init() {
     Serial.println("[GPS] Initializing...");
-    GPSSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    Serial.printf("[GPS] Serial2 on RX=%d TX=%d @ %d baud\n", GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+    _rxPin   = GPS_RX_PIN;
+    _txPin   = GPS_TX_PIN;
+    _swapped = false;
 
-    // Give GPS module time to power up
-    delay(1000);
+    int    lastCharCount = 0;
+    String lastBuf;
 
-    // Listen for NMEA sentences to detect GPS module
-    unsigned long start = millis();
-    int charCount = 0;
-    bool foundNMEA = false;
-    String buf;
+    // -------------------------------------------------------------------------
+    // Try configured pins first.  If we get 0 bytes, silently retry with RX/TX
+    // swapped — a common soldering mistake that we can correct in software.
+    // If the first attempt gives bytes (even garbled), swapping won't help
+    // (baud/mode issue), so we bail immediately after one attempt.
+    // -------------------------------------------------------------------------
+    for (int attempt = 0; attempt < 2; attempt++) {
 
-    Serial.println("[GPS] Listening for NMEA data...");
-    while (millis() - start < GPS_DETECT_TIMEOUT_MS) {
-        while (GPSSerial.available()) {
-            char c = GPSSerial.read();
-            charCount++;
-            _gps.encode(c);
+        if (attempt == 1) {
+            // First attempt heard nothing — try the other way round
+            Serial.println("[GPS] No data on configured pins — retrying with RX/TX swapped...");
+            GPSSerial.end();
+            delay(50);
+            _rxPin = GPS_TX_PIN;
+            _txPin = GPS_RX_PIN;
+        }
 
-            if (c >= 32 && c <= 126) {
-                buf += c;
-                if (buf.length() > 200) {
-                    buf = buf.substring(buf.length() - 200);
+        GPSSerial.begin(GPS_BAUD, SERIAL_8N1, _rxPin, _txPin);
+        Serial.printf("[GPS] Serial2 on RX=%d TX=%d @ %d baud\n", _rxPin, _txPin, GPS_BAUD);
+
+        if (attempt == 0) delay(1000);   // power-up wait on first try only
+
+        // Listen for NMEA sentences
+        unsigned long start = millis();
+        int    charCount = 0;
+        bool   foundNMEA = false;
+        String buf;
+
+        Serial.printf("[GPS] Listening for NMEA data (%d ms)...\n", GPS_DETECT_TIMEOUT_MS);
+        while (millis() - start < GPS_DETECT_TIMEOUT_MS) {
+            while (GPSSerial.available()) {
+                char c = GPSSerial.read();
+                charCount++;
+                _gps.encode(c);
+                if (c >= 32 && c <= 126) {
+                    buf += c;
+                    if (buf.length() > 200) buf = buf.substring(buf.length() - 200);
                 }
             }
+            delay(10);
         }
-        delay(10);
-    }
 
-    // Check for NMEA sentence markers
-    if (buf.indexOf("$GP") >= 0 || buf.indexOf("$GN") >= 0 ||
-        buf.indexOf("$GL") >= 0 || buf.indexOf("$GPGGA") >= 0 ||
-        buf.indexOf("$GPRMC") >= 0) {
-        foundNMEA = true;
-    }
+        if (buf.indexOf("$GP") >= 0 || buf.indexOf("$GN") >= 0 ||
+            buf.indexOf("$GL") >= 0 || buf.indexOf("$GPGGA") >= 0 ||
+            buf.indexOf("$GPRMC") >= 0) {
+            foundNMEA = true;
+        }
 
-    if (foundNMEA && charCount > 10) {
-        Serial.printf("[GPS] Module detected! %d chars, valid NMEA found\n", charCount);
-        _detected = true;
-        return true;
+        lastCharCount = charCount;
+        lastBuf       = buf;
+
+        if (foundNMEA && charCount > 10) {
+            if (attempt == 1) {
+                _swapped = true;
+                Serial.println("[GPS] *** Module detected — RX/TX were SWAPPED! Running corrected. ***");
+                Serial.printf("[GPS] *** Permanent fix: swap the two wires on pins %d and %d\n",
+                              GPS_RX_PIN, GPS_TX_PIN);
+            } else {
+                Serial.printf("[GPS] Module detected! %d chars, valid NMEA found\n", charCount);
+            }
+            _detected = true;
+            return true;
+        }
+
+        // Got bytes but no NMEA → baud/mode issue; swapping won't help
+        if (charCount > 0) break;
+
+        // charCount == 0 on attempt 0 → loop will try swapped next
     }
 
     // -------------------------------------------------------------------------
-    // Not detected — give actionable diagnostic based on what we saw
+    // Not detected — tiered diagnostics based on last attempt result
     // -------------------------------------------------------------------------
-    if (charCount == 0) {
-        // Zero bytes means our RX pin heard nothing at all.
-        // Most likely cause on a freshly-wired board: RX and TX are swapped.
-        Serial.println("[GPS] No data received (0 bytes in 5 s). Possible causes:");
-        Serial.printf("[GPS]   1) RX/TX wires swapped — ESP32 RX=%d TX=%d, try swapping the two wires\n",
-                      GPS_RX_PIN, GPS_TX_PIN);
-        Serial.println("[GPS]   2) GPS module not powered or 3.3 V rail missing");
-        Serial.printf("[GPS]   3) Wrong pin numbers in config.h (currently RX=%d TX=%d)\n",
-                      GPS_RX_PIN, GPS_TX_PIN);
-        Serial.printf("[GPS]   4) Baud rate mismatch (configured: %d) — try 4800 or 38400\n",
+    if (lastCharCount == 0) {
+        // Both pin combos gave nothing — not a swap issue
+        Serial.println("[GPS] No data received on either pin combination. Possible causes:");
+        Serial.println("[GPS]   1) GPS module not powered or 3.3 V rail missing");
+        Serial.printf("[GPS]   2) Wrong pin numbers in config.h (tried RX=%d TX=%d and RX=%d TX=%d)\n",
+                      GPS_RX_PIN, GPS_TX_PIN, GPS_TX_PIN, GPS_RX_PIN);
+        Serial.printf("[GPS]   3) Baud rate mismatch (configured: %d) — try 4800 or 38400\n",
                       GPS_BAUD);
     } else {
-        // We got bytes but no recognisable NMEA '$GP'/'$GN'/'$GL' prefix.
-        // Usually a baud rate mismatch making everything garbled, or the
-        // module is in a binary (UBX) mode.  Show the raw chars so the user
-        // can see whether it looks like noise or a different protocol.
-        Serial.printf("[GPS] Got %d bytes but no NMEA sentences found. Possible causes:\n", charCount);
-        Serial.printf("[GPS]   1) Baud rate mismatch (configured: %d) — common alternatives: 4800, 38400, 115200\n",
+        // Got bytes but no recognisable NMEA — baud mismatch or binary mode
+        Serial.printf("[GPS] Got %d bytes but no NMEA sentences found. Possible causes:\n", lastCharCount);
+        Serial.printf("[GPS]   1) Baud rate mismatch (configured: %d) — try 4800, 38400, 115200\n",
                       GPS_BAUD);
         Serial.println("[GPS]   2) GPS module in binary/UBX mode — needs u-center factory reset");
-        Serial.println("[GPS]   3) RX/TX swapped and receiving own TX loopback (garbled data)");
-        if (buf.length() > 0) {
-            Serial.printf("[GPS]   Raw sample: \"%s\"\n", buf.substring(0, 80).c_str());
+        if (lastBuf.length() > 0) {
+            Serial.printf("[GPS]   Raw sample: \"%s\"\n", lastBuf.substring(0, 80).c_str());
         }
     }
 
@@ -116,8 +144,9 @@ uint32_t GpsHandler::getUpdateIntervalMs() {
 void GpsHandler::printStatus() {
     Serial.println("[GPS] Status:");
     Serial.printf("  Detected:         %s\n", _detected ? "yes" : "no");
-    Serial.printf("  Pins:             RX=%d  TX=%d  @ %d baud\n",
-                  GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+    Serial.printf("  Pins:             RX=%d  TX=%d  @ %d baud%s\n",
+                  _rxPin, _txPin, GPS_BAUD,
+                  _swapped ? "  *** SWAPPED — fix wiring! ***" : "");
 
     // TinyGPS++ parser counters — key wiring/baud diagnostics
     uint32_t chars    = _gps.charsProcessed();
@@ -130,7 +159,7 @@ void GpsHandler::printStatus() {
     // Warn about likely wiring or baud issues
     if (_detected && chars == 0) {
         Serial.println("  *** WARNING: 0 chars since boot — GPS wires may have come loose");
-        Serial.printf( "  ***          Check RX/TX at pins %d/%d\n", GPS_RX_PIN, GPS_TX_PIN);
+        Serial.printf( "  ***          Check RX/TX at pins %d/%d\n", _rxPin, _txPin);
     } else if (failures > 10 && failures > chars / 4) {
         // More than 25 % checksum failures suggests data is garbled
         Serial.printf("  *** WARNING: high checksum failure rate (%lu/%lu)\n", failures, chars);

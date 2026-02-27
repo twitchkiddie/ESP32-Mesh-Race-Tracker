@@ -45,7 +45,13 @@ public:
     // Print status to serial
     void printStatus();
 
+    // Were RX/TX found to be swapped at boot? (running corrected, but wiring should be fixed)
+    bool isSwapped() const { return _swapped; }
+
 private:
     TinyGPSPlus _gps;
-    bool _detected = false;
+    bool     _detected = false;
+    bool     _swapped  = false;   // true if module only worked with pins swapped
+    uint8_t  _rxPin    = GPS_RX_PIN;
+    uint8_t  _txPin    = GPS_TX_PIN;
 };
