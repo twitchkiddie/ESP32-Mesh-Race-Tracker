@@ -37,6 +37,10 @@ Thumbs.db
 ota_log.txt
 role_out.txt
 
+# Allow azure_relay source files that happen to have blocked extensions
+!azure_relay/requirements.txt
+!azure_relay/startup.txt
+
 # Python
 __pycache__/
 *.pyc
