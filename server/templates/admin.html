@@ -113,6 +113,10 @@
       border-bottom: 1px solid var(--border);
       position: sticky; top: 0;
     }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--text); background: var(--surface); }
+    th.sort-asc::after  { content: ' ▲'; color: var(--blue); font-size: 9px; }
+    th.sort-desc::after { content: ' ▼'; color: var(--blue); font-size: 9px; }
     td {
       padding: 7px 10px; border-bottom: 1px solid rgba(48,54,61,0.5);
       white-space: nowrap; vertical-align: middle;
@@ -305,30 +309,30 @@
       <table id="node-table">
         <thead>
           <tr>
-            <th>Node</th>
-            <th>Name</th>
-            <th>ID</th>
-            <th>MAC</th>
-            <th>Role</th>
-            <th>GPS</th>
-            <th>Lat</th>
-            <th>Lon</th>
-            <th>Alt m</th>
-            <th>Speed km/h</th>
-            <th>Heading</th>
-            <th>Sats</th>
-            <th>HDOP</th>
+            <th class="sortable" data-col="label"       onclick="setSortCol('label')">Node</th>
+            <th class="sortable" data-col="display_name" onclick="setSortCol('display_name')">Name</th>
+            <th class="sortable" data-col="device_id"   onclick="setSortCol('device_id')">ID</th>
+            <th class="sortable" data-col="mac"         onclick="setSortCol('mac')">MAC</th>
+            <th class="sortable" data-col="role_name"   onclick="setSortCol('role_name')">Role</th>
+            <th class="sortable" data-col="has_gps"     onclick="setSortCol('has_gps')">GPS</th>
+            <th class="sortable" data-col="lat"         onclick="setSortCol('lat')">Lat</th>
+            <th class="sortable" data-col="lon"         onclick="setSortCol('lon')">Lon</th>
+            <th class="sortable" data-col="alt_m"       onclick="setSortCol('alt_m')">Alt m</th>
+            <th class="sortable" data-col="speed_kmph"  onclick="setSortCol('speed_kmph')">Speed km/h</th>
+            <th class="sortable" data-col="heading_deg" onclick="setSortCol('heading_deg')">Heading</th>
+            <th class="sortable" data-col="satellites"  onclick="setSortCol('satellites')">Sats</th>
+            <th class="sortable" data-col="hdop"        onclick="setSortCol('hdop')">HDOP</th>
             <th>Peers (RSSI)</th>
-            <th>Batt mV</th>
-            <th>Batt %</th>
-            <th>Nodes seen</th>
-            <th>Uptime</th>
-            <th>Hop</th>
-            <th>Seq</th>
-            <th>GPS pkts</th>
-            <th>HB pkts</th>
-            <th>Age</th>
-            <th>FW Ver</th>
+            <th class="sortable" data-col="batt_mv"     onclick="setSortCol('batt_mv')">Batt mV</th>
+            <th class="sortable" data-col="batt_pct"    onclick="setSortCol('batt_pct')">Batt %</th>
+            <th class="sortable" data-col="nodes_seen"  onclick="setSortCol('nodes_seen')">Nodes seen</th>
+            <th class="sortable" data-col="uptime_s"    onclick="setSortCol('uptime_s')">Uptime</th>
+            <th class="sortable" data-col="hop_count"   onclick="setSortCol('hop_count')">Hop</th>
+            <th class="sortable" data-col="seq_num"     onclick="setSortCol('seq_num')">Seq</th>
+            <th class="sortable" data-col="gps_count"   onclick="setSortCol('gps_count')">GPS pkts</th>
+            <th class="sortable" data-col="hb_count"    onclick="setSortCol('hb_count')">HB pkts</th>
+            <th class="sortable" data-col="age_s"       onclick="setSortCol('age_s')">Age</th>
+            <th class="sortable" data-col="fw_version"  onclick="setSortCol('fw_version')">FW Ver</th>
           </tr>
         </thead>
         <tbody id="node-tbody">
@@ -537,6 +541,23 @@ let lastNodes         = {};
 let lastLog           = [];
 let focusedSelectMac  = null;   // MAC of row whose ID dropdown is open
 let namingMac         = null;   // MAC of row whose name input is active
+let sortCol           = null;   // null = default (role → device_id)
+let sortDir           = 1;      // 1 = ascending, -1 = descending
+
+function setSortCol(col) {
+  if (sortCol === col) {
+    sortDir = -sortDir;
+  } else {
+    sortCol = col;
+    sortDir = 1;
+  }
+  // Update header arrows
+  document.querySelectorAll('#node-table th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === col) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+  renderNodes(lastNodes);
+}
 
 function setRoleFilter(role) {
   activeRoleFilter = role;
@@ -621,7 +642,18 @@ function renderNodes(nodes) {
   const tbody = document.getElementById('node-tbody');
   const q     = (document.getElementById('node-search').value || '').toLowerCase();
 
-  let list = Object.values(nodes).sort((a,b) => a.role - b.role || a.device_id - b.device_id);
+  let list = Object.values(nodes);
+  if (sortCol) {
+    list.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = typeof vb === 'number' ? -Infinity : '';
+      if (vb == null) vb = typeof va === 'number' ? -Infinity : '';
+      if (typeof va === 'number' && typeof vb === 'number') return sortDir * (va - vb);
+      return sortDir * String(va).localeCompare(String(vb), undefined, {numeric: true});
+    });
+  } else {
+    list.sort((a, b) => a.role - b.role || a.device_id - b.device_id);
+  }
 
   // Role filter
   if (activeRoleFilter !== 'all')
