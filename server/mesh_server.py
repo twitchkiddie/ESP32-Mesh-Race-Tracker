@@ -75,6 +75,37 @@ def admin():
     return render_template('admin.html')
 
 
+@app.route('/api/node/<path:mac>/name', methods=['POST', 'DELETE'])
+def api_node_name(mac):
+    """Set or clear a custom display name for a node."""
+    if request.method == 'DELETE':
+        bridge.clear_name(mac)
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name', '')).strip()
+    if name:
+        bridge.set_name(mac, name)
+    else:
+        bridge.clear_name(mac)
+    return jsonify({'ok': True, 'name': name})
+
+
+@app.route('/api/node/<path:mac>/id', methods=['POST'])
+def api_node_set_id(mac):
+    """Send CMD_SET_DEVICE_ID to a node over the mesh (via gateway)."""
+    if bridge is None:
+        return jsonify({'error': 'Bridge not initialized'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        new_id = int(data.get('id', -1))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid id'}), 400
+    if not (0 <= new_id <= 30):
+        return jsonify({'error': 'ID must be 0–30'}), 400
+    ok = bridge.send_cmd_set_device_id(mac, new_id)
+    return jsonify({'ok': ok})
+
+
 @app.route('/api/log')
 def api_log():
     if bridge is None:

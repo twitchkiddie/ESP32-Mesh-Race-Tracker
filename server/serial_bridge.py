@@ -6,6 +6,8 @@ Frame format: [0xAA][0x55][LEN_LO][LEN_HI][PAYLOAD...][CRC_LO][CRC_HI]
 CRC: CRC16-CCITT (XModem) over PAYLOAD only.
 """
 
+import json
+import os
 import struct
 import threading
 import time
@@ -348,7 +350,8 @@ class SerialBridge:
         bridge.stop()
     """
 
-    def __init__(self, port: str, baud: int = 115200, reconnect_delay: float = 3.0):
+    def __init__(self, port: str, baud: int = 115200, reconnect_delay: float = 3.0,
+                 names_file: Optional[str] = None):
         self.port = port
         self.baud = baud
         self.reconnect_delay = reconnect_delay
@@ -357,11 +360,16 @@ class SerialBridge:
         self.gateway = GatewayStatus(port=port)
         self.frame_log: deque = deque(maxlen=200)  # newest first
 
+        # Custom display names: {mac_str: name_str}
+        self._names_file = names_file or os.path.join(os.path.dirname(__file__), 'names.json')
+        self._custom_names: Dict[str, str] = self._load_names()
+
         self._lock = threading.Lock()
         self._callbacks: List[Callable] = []
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._parser = FrameParser()
+        self._ser: Optional[serial.Serial] = None  # set while connected, for sending commands
 
     def on_update(self, callback: Callable):
         """Register callback: fn(nodes: dict, gateway: GatewayStatus)"""
@@ -384,8 +392,15 @@ class SerialBridge:
     def get_state(self) -> dict:
         """Thread-safe snapshot of current state."""
         with self._lock:
+            nodes = {}
+            for mac, n in self.nodes.items():
+                d = n.to_dict()
+                custom = self._custom_names.get(mac, '')
+                d['custom_name'] = custom
+                d['display_name'] = custom if custom else d['label']
+                nodes[mac] = d
             return {
-                "nodes": {mac: n.to_dict() for mac, n in self.nodes.items()},
+                "nodes": nodes,
                 "gateway": self.gateway.to_dict(),
                 "timestamp": time.time(),
             }
@@ -394,6 +409,86 @@ class SerialBridge:
         """Thread-safe snapshot of recent frame log (newest first)."""
         with self._lock:
             return list(self.frame_log)[:limit]
+
+    # ------------------------------------------------------------------
+    # Custom names
+    # ------------------------------------------------------------------
+
+    def _load_names(self) -> Dict[str, str]:
+        try:
+            with open(self._names_file, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_names(self):
+        try:
+            with open(self._names_file, 'w') as f:
+                json.dump(self._custom_names, f, indent=2)
+        except Exception as e:
+            logger.error(f"[Bridge] Could not save names: {e}")
+
+    def set_name(self, mac: str, name: str):
+        """Set a custom display name for a node. Persists to names.json."""
+        with self._lock:
+            self._custom_names[mac] = name[:32].strip()
+        self._save_names()
+
+    def clear_name(self, mac: str):
+        """Remove the custom display name for a node."""
+        with self._lock:
+            self._custom_names.pop(mac, None)
+        self._save_names()
+
+    def get_names(self) -> Dict[str, str]:
+        with self._lock:
+            return dict(self._custom_names)
+
+    # ------------------------------------------------------------------
+    # Outbound command sending (laptop → gateway → mesh)
+    # ------------------------------------------------------------------
+
+    def _build_frame(self, msg_payload: bytes) -> bytes:
+        """Wrap a binary message payload in the serial framing envelope."""
+        c = crc16(msg_payload)
+        return (bytes([SYNC1, SYNC2,
+                       len(msg_payload) & 0xFF,
+                       (len(msg_payload) >> 8) & 0xFF])
+                + msg_payload
+                + bytes([c & 0xFF, (c >> 8) & 0xFF]))
+
+    def send_cmd_set_device_id(self, target_mac_str: str, new_id: int) -> bool:
+        """
+        Send CMD_SET_DEVICE_ID to a specific node via the gateway.
+        The gateway rewrites src_mac before forwarding to the mesh.
+        Returns True if the frame was written to the serial port.
+        """
+        if self._ser is None:
+            logger.warning("[Bridge] send_cmd_set_device_id: not connected")
+            return False
+        try:
+            target_mac = bytes(int(x, 16) for x in target_mac_str.split(':'))
+            # CommandMessage layout (33 bytes total):
+            #   PacketHeader (10): msg_type hop dev_id seq src_mac(6)
+            #   Body       (23): cmd_type target_mac(6) payload(16)
+            payload_bytes = bytes([new_id]) + b'\x00' * 15
+            msg = struct.pack('<BBBB6sB6s16s',
+                              0x10,        # MSG_CMD
+                              0,           # hop_count (gateway sets)
+                              0,           # device_id (don't care)
+                              0,           # seq_num (don't care)
+                              b'\x00' * 6, # src_mac (gateway overwrites)
+                              0x01,        # CMD_SET_DEVICE_ID
+                              target_mac,
+                              payload_bytes)
+            frame = self._build_frame(msg)
+            with self._lock:
+                self._ser.write(frame)
+            logger.info(f"[Bridge] CMD_SET_DEVICE_ID → {target_mac_str} new_id={new_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[Bridge] send_cmd_set_device_id error: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # Internal
@@ -421,6 +516,7 @@ class SerialBridge:
         ) as ser:
             ser.setDTR(False)
             ser.setRTS(False)
+            self._ser = ser          # store ref so send_cmd_* can write
             self._parser = FrameParser()
 
             # --- Gateway activation (server-side logic) ---
@@ -456,6 +552,7 @@ class SerialBridge:
                     if payload is not None:
                         self._process_frame(payload)
 
+        self._ser = None
         with self._lock:
             self.gateway.connected = False
         self._notify()

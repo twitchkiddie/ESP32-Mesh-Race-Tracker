@@ -224,6 +224,22 @@
     .log-paused-badge.visible { display: inline-block; }
 
     /* ------------------------------------------------------------------ */
+    /* Inline name editor                                                   */
+    /* ------------------------------------------------------------------ */
+    .name-cell { cursor: pointer; display: flex; align-items: center; gap: 5px; }
+    .name-cell:hover .edit-icon { opacity: 1; }
+    .edit-icon { opacity: 0; font-size: 11px; color: var(--text-dim); transition: opacity 0.15s; }
+    .name-input {
+      background: var(--bg); border: 1px solid var(--blue); border-radius: 4px;
+      color: var(--text); font-size: 12px; padding: 2px 6px; width: 110px; outline: none;
+    }
+    .id-select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); font-size: 11px; padding: 2px 4px; cursor: pointer; outline: none;
+    }
+    .id-select:focus { border-color: var(--blue); }
+
+    /* ------------------------------------------------------------------ */
     /* Empty state                                                          */
     /* ------------------------------------------------------------------ */
     .empty { padding: 24px; text-align: center; color: var(--text-dim); }
@@ -290,6 +306,8 @@
         <thead>
           <tr>
             <th>Node</th>
+            <th>Name</th>
+            <th>ID</th>
             <th>MAC</th>
             <th>Role</th>
             <th>GPS</th>
@@ -314,7 +332,7 @@
           </tr>
         </thead>
         <tbody id="node-tbody">
-          <tr><td colspan="22" class="empty">Waiting for nodes…</td></tr>
+          <tr><td colspan="24" class="empty">Waiting for nodes…</td></tr>
         </tbody>
       </table>
     </div>
@@ -455,6 +473,58 @@ function fmtGwLink(mac, rssi, allNodes) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline name editing
+// ---------------------------------------------------------------------------
+
+function startNameEdit(mac, cell) {
+  // Replace cell content with an input
+  const current = (cell.querySelector('span:first-child') || {}).textContent || '';
+  const clean = current === 'add name…' ? '' : current;
+  cell.innerHTML = '<input class="name-input" value="' + esc(clean) + '" maxlength="32" ' +
+    'onblur="commitName(\'' + mac + '\',this)" ' +
+    'onkeydown="nameKey(event,\'' + mac + '\',this)" autofocus>';
+  cell.querySelector('input').select();
+}
+
+function nameKey(e, mac, input) {
+  if (e.key === 'Enter')  { e.preventDefault(); commitName(mac, input); }
+  if (e.key === 'Escape') { renderNodes(lastNodes); }  // cancel
+}
+
+async function commitName(mac, input) {
+  const name = input.value.trim();
+  try {
+    await fetch('/api/node/' + mac + '/name', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+    // Optimistically update lastNodes so re-render shows it immediately
+    if (lastNodes[mac]) lastNodes[mac].custom_name = name;
+  } catch(e) { /* ignore, poll will fix */ }
+  renderNodes(lastNodes);
+}
+
+// ---------------------------------------------------------------------------
+// Device ID change
+// ---------------------------------------------------------------------------
+
+async function changeDeviceId(mac, sel) {
+  const newId = parseInt(sel.value, 10);
+  try {
+    const resp = await fetch('/api/node/' + mac + '/id', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: newId}),
+    });
+    const data = await resp.json();
+    if (!data.ok) alert('Failed to set device ID: ' + (data.error || 'unknown error'));
+  } catch(e) {
+    alert('Error sending command: ' + e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Filter state
 // ---------------------------------------------------------------------------
 let activeRoleFilter = 'all';
@@ -560,7 +630,7 @@ function renderNodes(nodes) {
       (n.label + n.mac + n.color_name).toLowerCase().includes(q));
 
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="22" class="empty">No matching nodes…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="24" class="empty">No matching nodes…</td></tr>';
     return;
   }
 
@@ -569,8 +639,25 @@ function renderNodes(nodes) {
     const fixTxt = n.is_stale ? 'stale' : (n.has_gps ? 'yes' : 'no');
     const batt   = n.batt_pct === -1 ? 'USB' : (n.batt_pct + '%');
     const battMv = n.batt_mv  || '—';
+
+    // Name cell — click to edit
+    const nameVal = n.custom_name || '';
+    const nameCellId = 'name-' + n.mac.replace(/:/g,'');
+    const nameCell = '<td><div class="name-cell" id="' + nameCellId + '" onclick="startNameEdit(\'' + n.mac + '\',this)">' +
+      (nameVal ? '<span style="color:var(--text)">' + esc(nameVal) + '</span>' : '<span style="color:var(--text-dim);font-style:italic">add name…</span>') +
+      '<span class="edit-icon">✏️</span></div></td>';
+
+    // Device ID cell — dropdown
+    let idOpts = '';
+    for (let i = 0; i <= 30; i++) {
+      idOpts += '<option value="' + i + '"' + (i === n.device_id ? ' selected' : '') + '>' + i + '</option>';
+    }
+    const idCell = '<td><select class="id-select" onchange="changeDeviceId(\'' + n.mac + '\',this)">' + idOpts + '</select></td>';
+
     return '<tr>' +
       '<td><span class="dot-inline" style="background:' + n.color + ';color:' + n.color + '"></span>' + esc(n.label) + '</td>' +
+      nameCell +
+      idCell +
       '<td class="mono">' + esc(n.mac) + '</td>' +
       '<td>' + roleBadge(n.role_name) + '</td>' +
       '<td class="' + fixCls + '">' + fixTxt + '</td>' +
