@@ -18,6 +18,7 @@ import json
 import math
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -234,6 +235,8 @@ class RaceEngine:
         self._active_name:  str                    = ''
         self._courses:      Dict[str, Course]      = {}   # all saved courses
         self._boats:        Dict[str, BoatRace]    = {}
+        self._events:           list          = []    # [{id, name, tracker_macs}]
+        self._active_event_id:  Optional[str] = None
 
     # ------------------------------------------------------------------
     # Course management
@@ -278,11 +281,66 @@ class RaceEngine:
                 self._active_name = ''
                 self._boats.clear()
 
+    # ---------------------------------------------------------------------------
+    # Event (heat/division) management
+    # ---------------------------------------------------------------------------
+
+    def list_events(self) -> list:
+        """Return all events with an 'active' flag added."""
+        with self._lock:
+            return [{**e, 'active': e['id'] == self._active_event_id}
+                    for e in self._events]
+
+    def add_event(self, name: str, tracker_macs: list) -> dict:
+        """Create a new named event and return it."""
+        evt = {
+            'id':           uuid.uuid4().hex[:12],
+            'name':         name.strip(),
+            'tracker_macs': list(tracker_macs),
+        }
+        with self._lock:
+            self._events.append(evt)
+        return evt
+
+    def remove_event(self, event_id: str) -> bool:
+        """Delete an event by id.  Clears active if it was the active one."""
+        with self._lock:
+            before = len(self._events)
+            self._events = [e for e in self._events if e['id'] != event_id]
+            if self._active_event_id == event_id:
+                self._active_event_id = None
+            return len(self._events) < before
+
+    def activate_event(self, event_id: str) -> bool:
+        """Set the active event.  Returns False if event_id not found."""
+        with self._lock:
+            if not any(e['id'] == event_id for e in self._events):
+                return False
+            self._active_event_id = event_id
+            return True
+
+    def clear_active_event(self):
+        """Remove the active event filter (all trackers become visible)."""
+        with self._lock:
+            self._active_event_id = None
+
+    def get_active_event(self) -> Optional[dict]:
+        """Return a copy of the active event dict, or None."""
+        with self._lock:
+            for e in self._events:
+                if e['id'] == self._active_event_id:
+                    return dict(e)
+            return None
+
+    # ---------------------------------------------------------------------------
+
     def save_config(self, path: str):
         with self._lock:
             data = {
-                'active':  self._active_name,
-                'courses': {n: c.to_dict() for n, c in self._courses.items()},
+                'active':           self._active_name,
+                'courses':          {n: c.to_dict() for n, c in self._courses.items()},
+                'events':           self._events,
+                'active_event_id':  self._active_event_id,
             }
             Path(path).write_text(json.dumps(data, indent=2))
 
@@ -309,6 +367,14 @@ class RaceEngine:
                     self._courses[course.name] = course
                     self._course      = course
                     self._active_name = course.name
+
+                # Load events (new field — absent in old configs, default to []/None)
+                self._events          = list(d.get('events', []))
+                self._active_event_id = d.get('active_event_id', None)
+                # Validate: clear if stored id no longer exists in events list
+                known_ids = {e['id'] for e in self._events}
+                if self._active_event_id not in known_ids:
+                    self._active_event_id = None
             return True
         except Exception:
             return False
@@ -480,7 +546,24 @@ class RaceEngine:
             course     = self._course
             boats_out  = []
 
+            # Resolve active event and build an optional MAC filter
+            active_event = None
+            event_macs   = None
+            if self._active_event_id:
+                for e in self._events:
+                    if e['id'] == self._active_event_id:
+                        active_event = dict(e)
+                        event_macs   = set(e['tracker_macs'])
+                        break
+
+            # When event is active, restrict the working node dict to event members
+            if event_macs is not None:
+                nodes = {mac: n for mac, n in nodes.items() if mac in event_macs}
+
             for mac, boat in self._boats.items():
+                # Skip boats that fall outside the active event scope
+                if event_macs is not None and mac not in event_macs:
+                    continue
                 bd   = boat.to_dict()
                 node = nodes.get(mac, {})
 
@@ -553,4 +636,5 @@ class RaceEngine:
                 "race_active":   active,
                 "race_finished": finished,
                 "timestamp":     time.time(),
+                "active_event":  active_event,   # None or {id, name, tracker_macs}
             }

@@ -186,6 +186,48 @@ def api_race_reset():
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------------------
+# Event (heat / division) routes
+# ---------------------------------------------------------------------------
+
+@app.route('/api/race/events', methods=['GET'])
+def api_race_events_list():
+    return jsonify(engine.list_events())
+
+
+@app.route('/api/race/events', methods=['POST'])
+def api_race_events_add():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    evt = engine.add_event(name, data.get('tracker_macs', []))
+    engine.save_config(_config_path)
+    return jsonify({'ok': True, 'event': evt}), 201
+
+
+# IMPORTANT: this literal route must be registered BEFORE the parameterized
+# /<event_id> route below so Flask does not treat "active" as an event id.
+@app.route('/api/race/events/active', methods=['POST'])
+def api_race_events_set_active():
+    data     = request.get_json(silent=True) or {}
+    event_id = data.get('event_id')          # None = clear active event
+    if event_id is None:
+        engine.clear_active_event()
+    elif not engine.activate_event(event_id):
+        return jsonify({'error': 'Event not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True, 'active_event_id': event_id})
+
+
+@app.route('/api/race/events/<string:event_id>', methods=['DELETE'])
+def api_race_events_delete(event_id):
+    if not engine.remove_event(event_id):
+        return jsonify({'error': 'Event not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True})
+
+
 @app.route('/api/race/dnf/<path:mac>', methods=['POST'])
 def api_race_dnf(mac):
     engine.flag_dnf(mac)

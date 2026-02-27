@@ -200,7 +200,7 @@
 <!-- Header                                                                 -->
 <!-- ===================================================================== -->
 <header>
-  <h1>Race Tracker <span>Live View ☁</span></h1>
+  <h1>Race Tracker <span id="hdr-subtitle">Live View ☁</span></h1>
 
   <div class="cloud-badge" id="cloud-badge">
     <div class="dot"></div>
@@ -232,7 +232,10 @@
 <!-- ===================================================================== -->
 <div id="panel">
   <div id="panel-header">
-    <span>Live Boats</span>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <span id="panel-title">Live Boats</span>
+      <span id="panel-event-subtitle" style="font-size:11px;color:var(--text-dim);font-style:italic;display:none"></span>
+    </div>
     <span id="panel-count" style="font-size:13px;color:var(--text)">0</span>
   </div>
   <div id="node-list">
@@ -529,14 +532,20 @@ function rankLabel(rank) {
 }
 
 function renderPanel() {
-  const list      = document.getElementById('node-list');
-  const noNodes   = document.getElementById('no-nodes');
-  const hdr       = document.querySelector('#panel-header span:first-child');
-  const raceBoats = raceState && raceState.boats && raceState.boats.length > 0;
+  const list       = document.getElementById('node-list');
+  const noNodes    = document.getElementById('no-nodes');
+  const titleEl    = document.getElementById('panel-title');
+  const subtitleEl = document.getElementById('panel-event-subtitle');
+  const raceBoats  = raceState && raceState.boats && raceState.boats.length > 0;
   const raceActive = raceState && (raceState.race_active || raceState.race_finished);
 
-  // Panel title
-  if (hdr) hdr.textContent = raceActive ? 'Race Standings' : 'Live Boats';
+  // Panel title + event subtitle
+  if (titleEl) titleEl.textContent = raceActive ? 'Race Standings' : 'Live Boats';
+  if (subtitleEl) {
+    const evtName = raceState && raceState.active_event && raceState.active_event.name;
+    subtitleEl.textContent = evtName || '';
+    subtitleEl.style.display = evtName ? '' : 'none';
+  }
 
   // Build display list
   let displayList;
@@ -623,6 +632,14 @@ function panFocusNode(mac) {
 // Header / stale banner
 // ---------------------------------------------------------------------------
 function updateHeader(prevStale) {
+  // Show active event name in header subtitle
+  const sub = document.getElementById('hdr-subtitle');
+  if (sub) {
+    sub.textContent = (raceState && raceState.active_event && raceState.active_event.name)
+      ? raceState.active_event.name
+      : 'Live View ☁';
+  }
+
   const badge = document.getElementById('cloud-badge');
   const label = document.getElementById('cloud-label');
   const banner = document.getElementById('stale-banner');
@@ -672,6 +689,14 @@ async function poll() {
     cloudAgeS  = data.cloud_age_s != null ? data.cloud_age_s : null;
     cloudStale = data.cloud_stale !== false;   // default true if missing
     raceState  = data.race || null;
+
+    // When an event is active, restrict visible nodes to that event's MACs only.
+    if (raceState && raceState.active_event &&
+        Array.isArray(raceState.active_event.tracker_macs) &&
+        raceState.active_event.tracker_macs.length > 0) {
+      const eventMacs = new Set(raceState.active_event.tracker_macs);
+      nodes = Object.fromEntries(Object.entries(nodes).filter(([mac]) => eventMacs.has(mac)));
+    }
 
     // Sync start/finish course lines onto map
     syncCourse();
