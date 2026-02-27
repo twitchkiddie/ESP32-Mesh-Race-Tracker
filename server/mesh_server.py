@@ -17,6 +17,7 @@ from flask import Flask, render_template, jsonify, request
 
 from serial_bridge import SerialBridge
 from race_engine import RaceEngine, Course
+from cloud_push import CloudPush
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -209,6 +210,10 @@ def main():
                         help='Web server port (default: 5000)')
     parser.add_argument('--gmaps-key', default=os.environ.get('GMAPS_KEY', ''),
                         help='Google Maps API key (or set GMAPS_KEY env var)')
+    parser.add_argument('--cloud-url', default=os.environ.get('CLOUD_URL', ''),
+                        help='Azure relay URL, e.g. https://myapp.azurewebsites.net (or set CLOUD_URL env var)')
+    parser.add_argument('--cloud-secret', default=os.environ.get('CLOUD_SECRET', ''),
+                        help='Shared secret for relay push endpoint (or set CLOUD_SECRET env var)')
     args = parser.parse_args()
 
     gmaps_key = args.gmaps_key
@@ -228,6 +233,11 @@ def main():
     bridge.on_update(lambda nodes, gw: engine.update(nodes))
     bridge.start()
 
+    # Optional cloud relay push (disabled if --cloud-url / CLOUD_URL not set)
+    cloud = CloudPush(url=args.cloud_url, secret=args.cloud_secret)
+    cloud.set_state_fn(bridge.get_state)
+    cloud.start()
+
     logger.info('[Server] Dashboard at http://localhost:%d/', args.web_port)
     logger.info('[Server] LAN access:  http://0.0.0.0:%d/', args.web_port)
     logger.info('[Server] Dashboard polls /api/state every 2 s (no WebSocket needed)')
@@ -241,6 +251,7 @@ def main():
         use_reloader=False,
     )
 
+    cloud.stop()
     bridge.stop()
 
 
