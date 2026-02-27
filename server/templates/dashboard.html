@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Mesh — Race Tracker</title>
+
+  <!-- Leaflet (OSM offline fallback) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --text-dim:  #8b949e;
+      --accent:    #238636;
+      --warn:      #d29922;
+      --err:       #da3633;
+      --panel-w:   320px;
+      --hdr-h:     52px;
+    }
+
+    html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1100;
+      height: var(--hdr-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+    }
+
+    header h1 { font-size: 18px; font-weight: 600; white-space: nowrap; }
+    header h1 span { color: var(--text-dim); font-weight: 400; font-size: 14px; margin-left: 6px; }
+
+    .gw-badge {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 20px;
+      background: var(--bg); border: 1px solid var(--border);
+      font-size: 13px; white-space: nowrap;
+    }
+    .gw-badge .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--err); transition: background 0.3s;
+    }
+    .gw-badge.online .dot { background: var(--accent); }
+
+    .hdr-stats {
+      display: flex; gap: 16px; margin-left: auto;
+      font-size: 13px; color: var(--text-dim);
+    }
+    .hdr-stats b { color: var(--text); }
+
+    /* ------------------------------------------------------------------ */
+    /* Map                                                                  */
+    /* ------------------------------------------------------------------ */
+    #map {
+      position: fixed;
+      top: var(--hdr-h); left: 0;
+      right: var(--panel-w); bottom: 0;
+      background: #1c2128;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Side panel                                                           */
+    /* ------------------------------------------------------------------ */
+    #panel {
+      position: fixed;
+      top: var(--hdr-h); right: 0;
+      width: var(--panel-w); bottom: 0;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+
+    #panel-header {
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-dim); flex-shrink: 0;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+
+    #node-list {
+      overflow-y: auto; flex: 1;
+    }
+
+    /* Node card */
+    .node-card {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .node-card:hover { background: rgba(255,255,255,0.04); }
+    .node-card.stale { opacity: 0.5; }
+
+    .node-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .node-dot {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+      box-shadow: 0 0 6px currentColor;
+    }
+    .node-name { font-weight: 600; font-size: 14px; }
+    .node-age  { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+
+    .node-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+      font-size: 12px;
+    }
+    .node-grid .label { color: var(--text-dim); }
+    .node-grid .val   { color: var(--text); font-variant-numeric: tabular-nums; }
+    .node-grid .full  { grid-column: 1 / -1; }
+
+    .fix-good { color: #3fb950; }
+    .fix-none { color: var(--err); }
+    .fix-stale{ color: var(--warn); }
+
+    /* Battery bar */
+    .batt-bar {
+      height: 4px; border-radius: 2px; background: var(--border); margin-top: 6px;
+      overflow: hidden;
+    }
+    .batt-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+    /* ------------------------------------------------------------------ */
+    /* Map tile layers info                                                 */
+    /* ------------------------------------------------------------------ */
+    #map-type-btns {
+      position: absolute; bottom: 16px; left: 16px; z-index: 500;
+      display: flex; gap: 6px;
+    }
+    .map-btn {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 6px 12px; border-radius: 6px;
+      font-size: 12px; cursor: pointer; transition: background 0.15s;
+    }
+    .map-btn:hover, .map-btn.active { background: #238636; border-color: #2ea043; }
+
+    /* ------------------------------------------------------------------ */
+    /* No-nodes placeholder                                                 */
+    /* ------------------------------------------------------------------ */
+    #no-nodes {
+      padding: 32px 16px; text-align: center; color: var(--text-dim);
+      font-size: 13px; line-height: 1.6;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Google Maps container (alternative to Leaflet)                      */
+    /* ------------------------------------------------------------------ */
+    #gmap { width: 100%; height: 100%; display: none; }
+
+    /* ------------------------------------------------------------------ */
+    /* Mobile responsive                                                    */
+    /* ------------------------------------------------------------------ */
+    @media (max-width: 768px) {
+      :root { --panel-w: 0px; }
+      #map { right: 0; }
+      #panel {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        top: auto; width: 100%; height: 40vh;
+        border-left: none; border-top: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===================================================================== -->
+<!-- Header                                                                 -->
+<!-- ===================================================================== -->
+<header>
+  <h1>Race Tracker <span>ESP32 Mesh V2</span></h1>
+
+  <div class="gw-badge" id="gw-badge">
+    <div class="dot"></div>
+    <span id="gw-label">Gateway offline</span>
+  </div>
+
+  <div class="hdr-stats">
+    <div>Nodes: <b id="stat-nodes">0</b></div>
+    <div>Frames: <b id="stat-frames">0</b></div>
+    <div>Uptime: <b id="stat-uptime">—</b></div>
+  </div>
+</header>
+
+<!-- ===================================================================== -->
+<!-- Map                                                                    -->
+<!-- ===================================================================== -->
+<div id="map">
+  <!-- Leaflet fills this by default; Google Maps replaces it if key given -->
+  <div id="gmap"></div>
+
+  <div id="map-type-btns">
+    <button class="map-btn active" onclick="setMapType('satellite')">Satellite</button>
+    <button class="map-btn" onclick="setMapType('street')">Street</button>
+    <button class="map-btn" onclick="setMapType('topo')">Topo</button>
+  </div>
+</div>
+
+<!-- ===================================================================== -->
+<!-- Side Panel                                                             -->
+<!-- ===================================================================== -->
+<div id="panel">
+  <div id="panel-header">
+    <span>Live Nodes</span>
+    <span id="panel-count" style="font-size:13px;color:var(--text)">0</span>
+  </div>
+  <div id="node-list">
+    <div id="no-nodes">
+      Waiting for nodes…<br><br>
+      Make sure the gateway is connected<br>and the mesh is powered on.
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================================== -->
+<!-- Script                                                                 -->
+<!-- ===================================================================== -->
+<script>
+// ---------------------------------------------------------------------------
+// Config from server
+// ---------------------------------------------------------------------------
+const GMAPS_KEY = '{{ gmaps_key }}';
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let nodes = {};
+let gateway = { connected: false };
+let mapMarkers = {};    // mac -> marker
+let mapTrails = {};     // mac -> polyline
+let gmapsMarkers = {};  // mac -> google.maps.Marker
+let gmapsTrails = {};   // mac -> google.maps.Polyline
+let useGmaps = false;
+let leafletMap, googleMap;
+let leafletLayers = {};
+let mapTypeActive = 'satellite';
+
+// ---------------------------------------------------------------------------
+// Leaflet tile layers
+// ---------------------------------------------------------------------------
+const TILE_LAYERS = {
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attr: 'Esri World Imagery',
+  },
+  street: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attr: '© OpenStreetMap contributors',
+  },
+  topo: {
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attr: '© OpenTopoMap contributors',
+  },
+};
+
+let currentLeafletLayer = null;
+
+function initLeaflet() {
+  leafletMap = L.map('map', {
+    center: [43.104, -77.413],
+    zoom: 16,
+    zoomControl: true,
+  });
+
+  currentLeafletLayer = L.tileLayer(TILE_LAYERS.satellite.url, {
+    attribution: TILE_LAYERS.satellite.attr,
+    maxZoom: 20,
+  }).addTo(leafletMap);
+}
+
+function setMapType(type) {
+  document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  mapTypeActive = type;
+
+  if (!useGmaps && leafletMap) {
+    if (currentLeafletLayer) leafletMap.removeLayer(currentLeafletLayer);
+    const cfg = TILE_LAYERS[type] || TILE_LAYERS.street;
+    currentLeafletLayer = L.tileLayer(cfg.url, { attribution: cfg.attr, maxZoom: 20 }).addTo(leafletMap);
+  }
+
+  if (useGmaps && googleMap) {
+    const gtype = type === 'satellite' ? 'satellite' : 'roadmap';
+    googleMap.setMapTypeId(gtype);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Google Maps init (if key available)
+// ---------------------------------------------------------------------------
+function initGoogleMaps() {
+  document.getElementById('gmap').style.display = 'block';
+  // Hide leaflet entirely when Google Maps loads
+  const mapDiv = document.getElementById('map');
+  // Remove the leaflet canvas but keep the map div
+  mapDiv.querySelectorAll('.leaflet-container').forEach(el => el.style.display = 'none');
+
+  googleMap = new google.maps.Map(document.getElementById('gmap'), {
+    center: { lat: 43.104, lng: -77.413 },
+    zoom: 16,
+    mapTypeId: 'satellite',
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false,
+    zoomControl: true,
+    styles: [{ featureType: 'all', elementType: 'labels', stylers: [{ lightness: -20 }] }],
+  });
+
+  useGmaps = true;
+}
+
+window.initGoogleMaps = initGoogleMaps;
+
+// ---------------------------------------------------------------------------
+// Marker / trail rendering
+// ---------------------------------------------------------------------------
+
+function colorToLeafletIcon(color, label) {
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='32' height='42' viewBox='0 0 32 42'>
+      <filter id='shadow'>
+        <feDropShadow dx='0' dy='2' stdDeviation='2' flood-opacity='0.5'/>
+      </filter>
+      <path filter='url(#shadow)'
+            d='M16 0 C8 0 2 6 2 14 C2 24 16 42 16 42 C16 42 30 24 30 14 C30 6 24 0 16 0Z'
+            fill='${color}' stroke='#fff' stroke-width='2'/>
+      <text x='16' y='18' text-anchor='middle' fill='white' font-size='11' font-weight='bold'
+            font-family='sans-serif'>${label}</text>
+    </svg>`;
+  return L.divIcon({
+    html: svg,
+    iconSize: [32, 42],
+    iconAnchor: [16, 42],
+    popupAnchor: [0, -42],
+    className: '',
+  });
+}
+
+function updateLeafletMarker(node) {
+  if (!leafletMap || !node.has_gps) return;
+  const mac = node.mac;
+  const latlng = [node.lat, node.lon];
+  const label = String(node.device_id);
+  const icon = colorToLeafletIcon(node.color, label);
+
+  const popupHtml = buildPopupHtml(node);
+
+  if (mapMarkers[mac]) {
+    mapMarkers[mac].setLatLng(latlng).setIcon(icon).setPopupContent(popupHtml);
+  } else {
+    mapMarkers[mac] = L.marker(latlng, { icon })
+      .bindPopup(popupHtml, { maxWidth: 260 })
+      .addTo(leafletMap);
+  }
+
+  // Trail
+  const trail = node.trail.map(p => [p.lat, p.lon]);
+  if (mapTrails[mac]) {
+    mapTrails[mac].setLatLngs(trail);
+  } else {
+    mapTrails[mac] = L.polyline(trail, {
+      color: node.color,
+      weight: 3,
+      opacity: 0.7,
+      dashArray: null,
+    }).addTo(leafletMap);
+  }
+}
+
+function updateGoogleMarker(node) {
+  if (!googleMap || !node.has_gps) return;
+  const mac = node.mac;
+  const pos = { lat: node.lat, lng: node.lon };
+
+  if (gmapsMarkers[mac]) {
+    gmapsMarkers[mac].setPosition(pos);
+    gmapsMarkers[mac].setTitle(buildMarkerTitle(node));
+  } else {
+    gmapsMarkers[mac] = new google.maps.Marker({
+      position: pos,
+      map: googleMap,
+      title: buildMarkerTitle(node),
+      label: {
+        text: String(node.device_id),
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: '12px',
+      },
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: node.color,
+        fillOpacity: 1,
+        strokeColor: '#fff',
+        strokeWeight: 2,
+      },
+    });
+
+    const iw = new google.maps.InfoWindow({ content: buildPopupHtml(node) });
+    gmapsMarkers[mac].addListener('click', () => iw.open(googleMap, gmapsMarkers[mac]));
+  }
+
+  // Trail
+  const path = node.trail.map(p => ({ lat: p.lat, lng: p.lon }));
+  if (gmapsTrails[mac]) {
+    gmapsTrails[mac].setPath(path);
+  } else {
+    gmapsTrails[mac] = new google.maps.Polyline({
+      path,
+      strokeColor: node.color,
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+      map: googleMap,
+    });
+  }
+}
+
+function buildMarkerTitle(node) {
+  return `${node.label} — ${node.speed_kmph} km/h`;
+}
+
+function buildPopupHtml(node) {
+  const fix = node.has_gps
+    ? `${node.lat.toFixed(6)}, ${node.lon.toFixed(6)}`
+    : 'No fix';
+  return `
+    <div style="font-family:sans-serif;font-size:13px;min-width:180px">
+      <div style="font-weight:bold;font-size:15px;color:${node.color};margin-bottom:6px">
+        ● ${node.label}
+      </div>
+      <table style="border-collapse:collapse;width:100%">
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Position</td><td>${fix}</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Speed</td><td>${node.speed_kmph} km/h</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Heading</td><td>${node.heading_deg.toFixed(0)}°</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Satellites</td><td>${node.satellites} (HDOP ${node.hdop})</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Battery</td><td>${node.batt_mv} mV (${battLabel(node)})</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">RSSI</td><td>${node.rssi} dBm</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Uptime</td><td>${fmtUptime(node.uptime_s)}</td></tr>
+        <tr><td style="color:#666;padding:2px 6px 2px 0">Hop</td><td>${node.hop_count}</td></tr>
+      </table>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Center map on first GPS fix
+// ---------------------------------------------------------------------------
+let hasCentered = false;
+function maybeCenterMap(node) {
+  if (hasCentered || !node.has_gps) return;
+  hasCentered = true;
+  if (useGmaps && googleMap) {
+    googleMap.setCenter({ lat: node.lat, lng: node.lon });
+  } else if (leafletMap) {
+    leafletMap.setView([node.lat, node.lon], 16);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Side panel rendering
+// ---------------------------------------------------------------------------
+
+function battLabel(node) {
+  if (node.batt_pct === -1) return 'USB';
+  return `${node.batt_pct}%`;
+}
+
+function battColor(pct) {
+  if (pct === -1) return '#58a6ff';
+  if (pct < 20)   return '#da3633';
+  if (pct < 50)   return '#d29922';
+  return '#3fb950';
+}
+
+function fmtUptime(s) {
+  if (!s) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function fmtAge(age) {
+  if (age < 2)  return 'now';
+  if (age < 60) return `${Math.round(age)}s ago`;
+  return `${Math.round(age/60)}m ago`;
+}
+
+function fixClass(node) {
+  if (node.is_stale) return 'fix-stale';
+  if (node.has_gps)  return 'fix-good';
+  return 'fix-none';
+}
+
+function fixLabel(node) {
+  if (node.is_stale) return 'stale';
+  if (node.has_gps)  return `${node.satellites} sats`;
+  return 'no fix';
+}
+
+function renderPanel() {
+  const list = document.getElementById('node-list');
+  const noNodes = document.getElementById('no-nodes');
+  const count = Object.keys(nodes).length;
+
+  document.getElementById('panel-count').textContent = count;
+
+  if (count === 0) {
+    noNodes.style.display = '';
+    list.querySelectorAll('.node-card').forEach(el => el.remove());
+    return;
+  }
+  noNodes.style.display = 'none';
+
+  // Sort: trackers first (role 0), then relay (1), gateway (2), then by device_id
+  const sorted = Object.values(nodes).sort((a, b) => {
+    if (a.role !== b.role) return a.role - b.role;
+    return a.device_id - b.device_id;
+  });
+
+  sorted.forEach(node => {
+    const id = `card-${node.mac.replace(/:/g, '')}`;
+    let card = document.getElementById(id);
+    if (!card) {
+      card = document.createElement('div');
+      card.id = id;
+      card.className = 'node-card';
+      card.onclick = () => panFocusNode(node.mac);
+      list.appendChild(card);
+    }
+    card.className = `node-card${node.is_stale ? ' stale' : ''}`;
+
+    const pct = node.batt_pct;
+    const bColor = battColor(pct);
+    const bWidth = pct === -1 ? 100 : Math.max(0, Math.min(100, pct));
+
+    card.innerHTML = `
+      <div class="node-header">
+        <div class="node-dot" style="background:${node.color};color:${node.color}"></div>
+        <span class="node-name">${node.label}</span>
+        <span class="node-age">${fmtAge(node.age_s)}</span>
+      </div>
+      <div class="node-grid">
+        <span class="label">GPS</span>
+        <span class="val ${fixClass(node)}">${fixLabel(node)}</span>
+
+        ${node.has_gps ? `
+        <span class="label">Speed</span>
+        <span class="val">${node.speed_kmph} km/h</span>
+        <span class="label">Heading</span>
+        <span class="val">${node.heading_deg.toFixed(0)}°</span>
+        <span class="label full" style="color:var(--text-dim);font-size:11px">
+          ${node.lat.toFixed(6)}, ${node.lon.toFixed(6)}
+        </span>
+        ` : ''}
+
+        <span class="label">Battery</span>
+        <span class="val">${node.batt_mv}mV ${battLabel(node)}</span>
+
+        <span class="label">Nodes seen</span>
+        <span class="val">${node.nodes_seen}</span>
+
+        <span class="label">RSSI</span>
+        <span class="val">${node.rssi} dBm</span>
+
+        <span class="label">Uptime</span>
+        <span class="val">${fmtUptime(node.uptime_s)}</span>
+      </div>
+      <div class="batt-bar">
+        <div class="batt-fill" style="width:${bWidth}%;background:${bColor}"></div>
+      </div>`;
+  });
+
+  // Remove cards for nodes that disappeared
+  list.querySelectorAll('.node-card').forEach(card => {
+    const mac = card.id.replace('card-', '').replace(/(..)/g, '$1:').slice(0,-1).toUpperCase();
+    // Simple check: if none of the sorted nodes match this card id, remove it
+    const found = sorted.some(n => `card-${n.mac.replace(/:/g, '')}` === card.id);
+    if (!found) card.remove();
+  });
+}
+
+function panFocusNode(mac) {
+  const node = nodes[mac];
+  if (!node || !node.has_gps) return;
+  if (useGmaps && googleMap) {
+    googleMap.panTo({ lat: node.lat, lng: node.lon });
+  } else if (leafletMap) {
+    leafletMap.panTo([node.lat, node.lon]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Header stats
+// ---------------------------------------------------------------------------
+function updateHeader() {
+  const badge = document.getElementById('gw-badge');
+  const label = document.getElementById('gw-label');
+  badge.classList.toggle('online', gateway.connected);
+
+  if (gateway.connected) {
+    label.textContent = `Gateway: ${gateway.port || ''}`;
+  } else {
+    label.textContent = 'Gateway offline';
+  }
+
+  document.getElementById('stat-nodes').textContent = Object.keys(nodes).length;
+  document.getElementById('stat-frames').textContent = gateway.frames_received || 0;
+  document.getElementById('stat-uptime').textContent = fmtUptime(gateway.uptime_s);
+}
+
+// ---------------------------------------------------------------------------
+// Polling — fetch /api/state every 2 s
+// ---------------------------------------------------------------------------
+let pollOk = false;
+
+async function poll() {
+  try {
+    const resp = await fetch('/api/state');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    if (!pollOk) { pollOk = true; console.log('[Poll] Connected'); }
+
+    nodes   = data.nodes   || {};
+    gateway = data.gateway || {};
+
+    Object.values(nodes).forEach(node => {
+      maybeCenterMap(node);
+      if (useGmaps) updateGoogleMarker(node);
+      else          updateLeafletMarker(node);
+    });
+
+    renderPanel();
+    updateHeader();
+  } catch (err) {
+    if (pollOk) { pollOk = false; console.warn('[Poll] Error:', err); }
+    gateway = Object.assign({}, gateway, { connected: false });
+    updateHeader();
+  }
+}
+
+// Kick off immediately, then repeat every 2 s
+poll();
+setInterval(poll, 2000);
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  if (GMAPS_KEY && GMAPS_KEY !== 'None' && GMAPS_KEY.trim() !== '') {
+    // Load Google Maps dynamically
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=initGoogleMaps`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+    // Leaflet still initializes as fallback before Google Maps loads
+    initLeaflet();
+  } else {
+    initLeaflet();
+  }
+});
+</script>
+
+{% if gmaps_key %}
+<!-- Google Maps key present — will be loaded dynamically via JS -->
+{% endif %}
+
+</body>
+</html>

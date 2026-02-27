@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Race Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif;
+               background: #0d1117; color: #e6edf3; }
+
+  /* ── Layout ───────────────────────────────────────────────────── */
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* Header */
+  #header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px; background: #161b22;
+    border-bottom: 1px solid #30363d; flex-shrink: 0;
+  }
+  #header h1 { font-size: 1.1rem; font-weight: 600; color: #f0f6fc; }
+  #course-name { color: #58a6ff; font-size: 0.95rem; flex: 1; min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status-badge {
+    padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase; flex-shrink: 0;
+  }
+  .status-pre      { background: #21262d; color: #8b949e; }
+  .status-racing   { background: #1a4721; color: #3fb950; animation: pulse 1.5s infinite; }
+  .status-finished { background: #1c2d4e; color: #58a6ff; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  #btn-edit  { padding: 5px 12px; border-radius: 6px; border: 1px solid #30363d;
+               background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.82rem; }
+  #btn-edit:hover  { background: #30363d; }
+  #btn-edit.active { background: #1a4721; border-color: #3fb950; color: #3fb950; }
+  #btn-reset { padding: 5px 12px; border-radius: 6px; border: 1px solid #30363d;
+               background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.82rem; }
+  #btn-reset:hover { background: #6e2a2a; border-color: #f85149; color: #f85149; }
+  #course-select {
+    padding: 4px 8px; background: #21262d; border: 1px solid #30363d;
+    border-radius: 6px; color: #c9d1d9; font-size: 0.82rem; cursor: pointer;
+    max-width: 200px;
+  }
+  #btn-delete-course { padding: 5px 10px; border-radius: 6px; border: 1px solid #30363d;
+                       background: #21262d; color: #f85149; cursor: pointer; font-size: 0.82rem; }
+  #btn-delete-course:hover { background: #3d1a1a; border-color: #f85149; }
+  #node-count { color: #8b949e; font-size: 0.82rem; flex-shrink: 0; }
+  #nav-links { display: flex; gap: 8px; }
+  #nav-links a { color: #58a6ff; font-size: 0.8rem; text-decoration: none; }
+  #nav-links a:hover { text-decoration: underline; }
+
+  /* Main area */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Course editor panel ──────────────────────────────────────── */
+  #editor-panel {
+    display: none; flex-direction: column; gap: 10px;
+    padding: 12px; background: #161b22;
+    border-bottom: 1px solid #30363d; flex-shrink: 0;
+  }
+  #editor-panel.visible { display: flex; flex-direction: row; flex-wrap: nowrap;
+                          align-items: center; overflow-x: auto; }
+  #editor-panel label { color: #8b949e; font-size: 0.8rem; margin-right: 4px; }
+  #course-name-input {
+    padding: 4px 8px; background: #21262d; border: 1px solid #30363d;
+    border-radius: 6px; color: #e6edf3; font-size: 0.85rem; width: 180px;
+  }
+  .tool-btn {
+    padding: 5px 10px; border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .tool-btn:hover   { background: #30363d; }
+  .tool-btn.active  { background: #1a4721; border-color: #3fb950; color: #3fb950; }
+  .tool-btn.wp-done { background: #1c2d4e; border-color: #58a6ff; color: #58a6ff; }
+  .tool-btn.set     { background: #1c2a1a; border-color: #3fb950; color: #3fb950; }
+  #btn-clear-wps { background: #21262d; color: #f85149; border-color: #30363d; }
+  #btn-save-course {
+    padding: 5px 14px; border-radius: 6px; border: 1px solid #3fb950;
+    background: #1a4721; color: #3fb950; cursor: pointer; font-size: 0.82rem;
+    font-weight: 600;
+  }
+  #btn-save-course:hover { background: #238636; }
+  #editor-hint { color: #8b949e; font-size: 0.78rem; font-style: italic; }
+
+  /* ── Leaderboard panel ────────────────────────────────────────── */
+  #leaderboard {
+    width: 310px; min-width: 280px; flex-shrink: 0;
+    overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+    border-right: 1px solid #30363d;
+  }
+  #no-course-msg { color: #8b949e; font-size: 0.88rem; text-align: center;
+                   padding: 24px 8px; }
+  #race-clock { text-align: center; font-size: 2rem; font-weight: 700;
+                color: #3fb950; font-variant-numeric: tabular-nums;
+                letter-spacing: 0.05em; padding: 4px 0; }
+  #race-clock.pre { color: #8b949e; font-size: 1rem; }
+  #race-dist { text-align: center; color: #8b949e; font-size: 0.78rem;
+               margin-bottom: 4px; }
+
+  /* Boat card */
+  .boat-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 10px 12px; position: relative; overflow: hidden;
+  }
+  .boat-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 4px; border-radius: 10px 0 0 10px;
+    background: var(--boat-color, #888);
+  }
+  .boat-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .rank-badge {
+    min-width: 28px; height: 28px; border-radius: 50%;
+    background: #21262d; border: 2px solid #30363d;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem; font-weight: 700; color: #f0f6fc; flex-shrink: 0;
+  }
+  .rank-badge.gold   { background: #b8860b; border-color: #ffd700; color: #fff; }
+  .rank-badge.silver { background: #555; border-color: #aaa; color: #fff; }
+  .rank-badge.bronze { background: #7b4c1a; border-color: #cd7f32; color: #fff; }
+  .boat-name { font-weight: 600; font-size: 0.95rem; flex: 1; }
+  .boat-status {
+    padding: 2px 7px; border-radius: 8px; font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
+  }
+  .st-pre_race  { background: #21262d; color: #8b949e; }
+  .st-racing    { background: #1a4721; color: #3fb950; }
+  .st-finished  { background: #1c2d4e; color: #58a6ff; }
+  .st-dnf       { background: #3d1a1a; color: #f85149; }
+  .boat-time { font-size: 1.5rem; font-weight: 700; color: #f0f6fc;
+               font-variant-numeric: tabular-nums; }
+  .boat-gap  { font-size: 0.85rem; color: #f0883e; font-weight: 600;
+               font-variant-numeric: tabular-nums; }
+  .boat-gap.leader { color: #3fb950; }
+  .boat-meta { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+  .meta-item { display: flex; align-items: center; gap: 4px;
+               font-size: 0.78rem; color: #8b949e; }
+  .meta-item span.val { color: #c9d1d9; }
+  .boat-progress {
+    margin-top: 8px; height: 4px; background: #21262d; border-radius: 2px; overflow: hidden;
+  }
+  .boat-progress-bar {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, var(--boat-color, #888), #3fb950);
+    transition: width 0.5s ease;
+  }
+  .dnf-btn {
+    margin-top: 6px; padding: 3px 8px; border-radius: 5px; font-size: 0.72rem;
+    border: 1px solid #f85149; background: transparent; color: #f85149;
+    cursor: pointer; float: right;
+  }
+  .dnf-btn:hover { background: #3d1a1a; }
+
+  /* ── Map ──────────────────────────────────────────────────────── */
+  #map { flex: 1; }
+
+  /* Custom rank marker */
+  .rank-marker {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid #fff; display: flex; align-items: center;
+    justify-content: center; font-size: 0.8rem; font-weight: 700;
+    color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  }
+  .boat-label-tooltip {
+    background: rgba(22,27,34,.9); border: 1px solid #30363d;
+    border-radius: 6px; padding: 2px 6px; font-size: 0.8rem;
+    color: #e6edf3; white-space: nowrap; box-shadow: none;
+  }
+  /* Stale opacity */
+  .stale { opacity: 0.45; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <div id="header">
+    <h1>🚣 Race</h1>
+    <select id="course-select" onchange="activateCourse(this.value)" title="Switch active course">
+      <option value="">— No course —</option>
+    </select>
+    <button id="btn-delete-course" onclick="deleteCourse()" title="Delete selected course">🗑</button>
+    <span id="status-badge" class="status-pre">Pre-Race</span>
+    <button id="btn-edit"  onclick="toggleEditor()">Edit Course</button>
+    <button id="btn-reset" onclick="resetRace()">Reset Race</button>
+    <span id="node-count">0 boats</span>
+    <div id="nav-links">
+      <a href="/">Map</a>
+      <a href="/admin">Admin</a>
+    </div>
+  </div>
+
+  <!-- ── Course editor bar ───────────────────────────────────────── -->
+  <div id="editor-panel">
+    <label>Name:</label>
+    <input id="course-name-input" type="text" placeholder="Race Course" value="">
+    <button class="tool-btn" id="tool-sl-p1"  onclick="setTool('sl-p1')">Start P1</button>
+    <button class="tool-btn" id="tool-sl-p2"  onclick="setTool('sl-p2')">Start P2</button>
+    <button class="tool-btn" id="tool-wp"     onclick="setTool('wp')">+ Waypoint</button>
+    <button class="tool-btn" id="btn-clear-wps" onclick="clearWaypoints()">Clear WPs</button>
+    <button class="tool-btn" id="btn-autoroute" onclick="autoRoute()" title="Query OpenStreetMap for the waterway between start and finish and auto-place waypoints">🌊 Auto-route</button>
+    <button class="tool-btn" id="tool-fl-p1"  onclick="setTool('fl-p1')">Finish P1</button>
+    <button class="tool-btn" id="tool-fl-p2"  onclick="setTool('fl-p2')">Finish P2</button>
+    <button id="btn-save-course" onclick="saveCourse()">Save Course</button>
+    <span id="editor-hint">Click on the map to place each mark</span>
+  </div>
+
+  <!-- ── Main content ────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Leaderboard -->
+    <div id="leaderboard">
+      <div id="race-clock" class="pre">No Course</div>
+      <div id="race-dist"></div>
+      <div id="lb-cards"><div id="no-course-msg">Set a course using "Edit Course" to begin.</div></div>
+    </div>
+
+    <!-- Map -->
+    <div id="map"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// Map initialisation
+// ═══════════════════════════════════════════════════════════════════════════
+
+const map = L.map('map', { zoomControl: true, attributionControl: true });
+
+// ── Base layers ────────────────────────────────────────────────────────────
+const TILES = {
+  // Satellite: shows water as dark/reflective, works at all zoom levels — best for racing
+  satellite: L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri &mdash; Source: Esri, USDA, USGS, AEX, GeoEye, Getmapping',
+      maxZoom: 20 }
+  ),
+  // Ocean: water = blue, land = muted grey — great overview at regatta scale
+  // maxNativeZoom:13 but we allow the browser to upscale beyond that (slight blur, still useful)
+  ocean: L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, NGA, others',
+      maxNativeZoom: 13, maxZoom: 20 }
+  ),
+  street: L.tileLayer(
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19 }
+  ),
+};
+
+// ── Overlay layers ─────────────────────────────────────────────────────────
+const OVERLAYS = {
+  // OpenSeaMap: nautical chart symbols, depth contours, nav marks, fairways
+  openSeaMap: L.tileLayer(
+    'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+    { attribution: 'Map data &copy; <a href="https://www.openseamap.org">OpenSeaMap</a>',
+      maxZoom: 18, opacity: 0.85 }
+  ).addTo(map),   // ← remove .addTo(map) here to make it opt-in instead of default-on
+};
+
+// Satellite default: shows water clearly at all race zoom levels
+TILES.satellite.addTo(map);
+
+L.control.layers(
+  { '🛰️ Satellite': TILES.satellite,
+    '🌊 Ocean chart': TILES.ocean,
+    '🗺️ Street':      TILES.street },
+  { '⚓ Nautical overlay': OVERLAYS.openSeaMap }
+).addTo(map);
+
+map.setView([51.5, -0.1], 14);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+
+let lastData         = null;
+let mapInitialised   = false;
+let boatMarkers      = {};   // mac → {marker, circle, trail}
+let courseLayers     = [];   // L.Layer[]
+let raceClockTimer   = null;
+let raceStartTime    = null;
+let editorMode       = false;
+let activeTool       = null;
+
+// Editor draft course
+let draft = {
+  name: '',
+  sl: { p1: null, p2: null },
+  fl: { p1: null, p2: null },
+  wps: []
+};
+let draftMarkers = [];   // temporary editor markers
+let draftLayers  = [];   // temporary editor course lines
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Polling
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function fetchRace() {
+  try {
+    const r = await fetch('/api/race');
+    if (!r.ok) return;
+    const data = await r.json();
+    lastData = data;
+    renderAll(data);
+  } catch (e) {}
+}
+
+// Refresh course list less often (every 5s) — only changes when user edits
+let _courseListTick = 0;
+async function pollLoop() {
+  await fetchRace();
+  if (_courseListTick++ % 3 === 0) await refreshCourseSelector();
+}
+
+setInterval(pollLoop, 2000);
+refreshCourseSelector();   // populate selector immediately on load
+fetchRace();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render all
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderAll(data) {
+  updateHeader(data);
+  updateLeaderboard(data);
+  if (!editorMode) updateCourse(data.course);
+  updateBoats(data.boats, data.course);
+}
+
+// ── Header ──────────────────────────────────────────────────────────────
+
+function updateHeader(data) {
+  const sb = document.getElementById('status-badge');
+  const nc = document.getElementById('node-count');
+  const n  = data.boats ? data.boats.length : 0;
+
+  nc.textContent = n + ' boat' + (n !== 1 ? 's' : '');
+
+  if (data.race_finished) {
+    sb.textContent = 'Finished'; sb.className = 'status-finished';
+  } else if (data.race_active) {
+    sb.textContent = 'Racing';   sb.className = 'status-racing';
+  } else {
+    sb.textContent = 'Pre-Race'; sb.className = 'status-pre';
+  }
+}
+
+// ── Course list (selector in header) ────────────────────────────────────
+
+async function refreshCourseSelector() {
+  try {
+    const r = await fetch('/api/race/courses');
+    const courses = await r.json();
+    const sel = document.getElementById('course-select');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— No course —</option>' +
+      courses.map(c => {
+        const km = c.total_m >= 1000
+          ? (c.total_m/1000).toFixed(2) + ' km'
+          : Math.round(c.total_m) + ' m';
+        return `<option value="${c.name}" ${c.active ? 'selected' : ''}>${c.name} (${km})</option>`;
+      }).join('');
+    // Restore selection if it still exists (handles post-delete)
+    if (!courses.find(c => c.active) && prev && courses.find(c => c.name === prev))
+      sel.value = prev;
+  } catch(e) {}
+}
+
+async function activateCourse(name) {
+  if (!name) return;
+  await fetch('/api/race/course/' + encodeURIComponent(name) + '/activate', { method: 'POST' });
+  fetchRace();
+}
+
+async function deleteCourse() {
+  const name = document.getElementById('course-select').value;
+  if (!name) { alert('Select a course to delete.'); return; }
+  if (!confirm(`Delete course "${name}"?\nThis cannot be undone.`)) return;
+  await fetch('/api/race/course/' + encodeURIComponent(name), { method: 'DELETE' });
+  await refreshCourseSelector();
+  fetchRace();
+}
+
+// ── Leaderboard ─────────────────────────────────────────────────────────
+
+function updateLeaderboard(data) {
+  const clock = document.getElementById('race-clock');
+  const dist  = document.getElementById('race-dist');
+  const cards = document.getElementById('lb-cards');
+
+  // Race clock
+  if (data.race_active || data.race_finished) {
+    // Find leader's elapsed time
+    const leader = data.boats && data.boats.find(b => b.rank === 1);
+    if (leader && leader.elapsed_fmt) {
+      clock.textContent = leader.elapsed_fmt;
+      clock.className = data.race_finished ? 'pre' : '';
+    }
+  } else {
+    clock.textContent = data.course ? 'Pre-Race' : 'No Course';
+    clock.className = 'pre';
+  }
+
+  // Course distance
+  if (data.course) {
+    const dm = data.course.total_distance_m;
+    dist.textContent = dm >= 1000
+      ? `${(dm/1000).toFixed(2)} km course`
+      : `${Math.round(dm)} m course`;
+  } else {
+    dist.textContent = '';
+  }
+
+  // No boats yet
+  if (!data.boats || data.boats.length === 0) {
+    cards.innerHTML = '<div id="no-course-msg">' +
+      (data.course ? 'Waiting for boats...' : 'Set a course using "Edit Course" to begin.') +
+      '</div>';
+    return;
+  }
+
+  const totalM = data.course ? data.course.total_distance_m : 0;
+
+  cards.innerHTML = data.boats.map(b => {
+    const rankClass = b.rank === 1 ? 'gold' : b.rank === 2 ? 'silver' : b.rank === 3 ? 'bronze' : '';
+    const rankTxt   = b.rank > 0 ? b.rank : '—';
+    const pct       = totalM > 0 ? Math.min(100, (b.distance_m / totalM) * 100) : 0;
+    const battColor = b.batt_pct < 20 ? '#f85149' : b.batt_pct < 50 ? '#e3b341' : '#3fb950';
+    const spd       = b.speed_kmph ? b.speed_kmph.toFixed(1) : '0.0';
+    const staleClass = b.age_s > 30 ? ' stale' : '';
+
+    return `
+    <div class="boat-card${staleClass}" style="--boat-color:${b.color}">
+      <div class="boat-top">
+        <div class="rank-badge ${rankClass}">${rankTxt}</div>
+        <div class="boat-name">${b.label}</div>
+        <div class="boat-status st-${b.status}">${statusLabel(b.status)}</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div class="boat-time">${b.elapsed_fmt}</div>
+        <div class="boat-gap ${b.gap_fmt==='Leader'?'leader':''}">${b.gap_fmt}</div>
+      </div>
+      <div class="boat-meta">
+        <div class="meta-item">ETA <span class="val">${b.eta_fmt}</span></div>
+        <div class="meta-item">⚡ <span class="val">${spd} km/h</span></div>
+        ${b.batt_pct >= 0
+          ? `<div class="meta-item">🔋 <span class="val" style="color:${battColor}">${b.batt_pct}%</span></div>`
+          : '<div class="meta-item"><span class="val">USB</span></div>'}
+        <div class="meta-item">📍 <span class="val">${(b.distance_m/1000).toFixed(3)} km</span></div>
+      </div>
+      <div class="boat-progress">
+        <div class="boat-progress-bar" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      ${b.status !== 'finished' && b.status !== 'dnf'
+        ? `<button class="dnf-btn" onclick="dnfBoat('${b.mac}')">DNF</button>`
+        : ''}
+    </div>`;
+  }).join('');
+}
+
+function statusLabel(s) {
+  return { pre_race:'Pre-Race', racing:'Racing', finished:'Finished', dnf:'DNF' }[s] || s;
+}
+
+// ── Catmull-Rom spline ────────────────────────────────────────────────────
+//
+// Converts a sparse array of [lat, lon] marks into a smooth curve that
+// passes exactly through every point.  Place waypoints at river bends and
+// the course line will follow the water instead of cutting across it.
+//
+// segments: interpolated steps per inter-mark segment (higher = smoother).
+// Returns a denser [lat, lon] array suitable for L.polyline().
+
+function catmullRom(pts, segments = 24) {
+  if (pts.length < 3) return pts;   // 2 pts → straight line, no benefit
+
+  const result = [];
+  // Pad: duplicate first and last so the curve reaches every input point
+  const p = [pts[0], ...pts, pts[pts.length - 1]];
+
+  for (let i = 0; i < p.length - 3; i++) {
+    const [a0, b0] = p[i];
+    const [a1, b1] = p[i + 1];
+    const [a2, b2] = p[i + 2];
+    const [a3, b3] = p[i + 3];
+
+    for (let t = 0; t < segments; t++) {
+      const s = t / segments, s2 = s * s, s3 = s2 * s;
+      // Standard Catmull-Rom formula, tension = 0.5
+      const lat = 0.5 * ((2*a1) + (-a0+a2)*s + (2*a0-5*a1+4*a2-a3)*s2 + (-a0+3*a1-3*a2+a3)*s3);
+      const lon = 0.5 * ((2*b1) + (-b0+b2)*s + (2*b0-5*b1+4*b2-b3)*s2 + (-b0+3*b1-3*b2+b3)*s3);
+      result.push([lat, lon]);
+    }
+  }
+  result.push(pts[pts.length - 1]);  // close: always reach the final mark
+  return result;
+}
+
+// ── Course drawing ───────────────────────────────────────────────────────
+
+function clearCourseLayers() {
+  courseLayers.forEach(l => map.removeLayer(l));
+  courseLayers = [];
+}
+
+function updateCourse(course) {
+  clearCourseLayers();
+  if (!course) return;
+
+  // Start line — blue dashed
+  if (course.start_line) {
+    const sl = course.start_line;
+    const l = L.polyline([[sl.p1.lat, sl.p1.lon], [sl.p2.lat, sl.p2.lon]],
+                          { color: '#58a6ff', weight: 3, dashArray: '8 5', opacity: 0.9 }).addTo(map);
+    l.bindTooltip('Start', { permanent: false, className: 'boat-label-tooltip' });
+    courseLayers.push(l);
+    // Pin markers
+    [[sl.p1.lat, sl.p1.lon], [sl.p2.lat, sl.p2.lon]].forEach(p => {
+      const m = L.circleMarker(p, { radius: 6, color: '#58a6ff', fillColor: '#58a6ff', fillOpacity: 1 }).addTo(map);
+      courseLayers.push(m);
+    });
+  }
+
+  // Finish line — green dashed
+  if (course.finish_line) {
+    const fl = course.finish_line;
+    const l = L.polyline([[fl.p1.lat, fl.p1.lon], [fl.p2.lat, fl.p2.lon]],
+                          { color: '#3fb950', weight: 3, dashArray: '8 5', opacity: 0.9 }).addTo(map);
+    l.bindTooltip('Finish', { permanent: false, className: 'boat-label-tooltip' });
+    courseLayers.push(l);
+    [[fl.p1.lat, fl.p1.lon], [fl.p2.lat, fl.p2.lon]].forEach(p => {
+      const m = L.circleMarker(p, { radius: 6, color: '#3fb950', fillColor: '#3fb950', fillOpacity: 1 }).addTo(map);
+      courseLayers.push(m);
+    });
+  }
+
+  // Course legs — Catmull-Rom spline through all marks (curves around river bends)
+  if (course.marks && course.marks.length >= 2) {
+    const raw    = course.marks.map(m => [m.lat, m.lon]);
+    const smooth = catmullRom(raw);          // densified smooth path
+    const shadow = L.polyline(smooth, { color: '#000', weight: 4, dashArray: '6 6', opacity: 0.35 }).addTo(map);
+    const l      = L.polyline(smooth, { color: '#fff', weight: 2, dashArray: '6 6', opacity: 0.9 }).addTo(map);
+    courseLayers.push(shadow, l);
+  }
+
+  // Waypoints — orange circles
+  if (course.waypoints) {
+    course.waypoints.forEach((wp, i) => {
+      const m = L.circleMarker([wp.lat, wp.lon],
+                               { radius: 7, color: '#f0883e', fillColor: '#f0883e', fillOpacity: 0.7, weight: 2 }).addTo(map);
+      m.bindTooltip(wp.name || `WP${i+1}`, { permanent: false, className: 'boat-label-tooltip' });
+      courseLayers.push(m);
+    });
+  }
+
+  // Auto-fit on first course load
+  if (!mapInitialised && course.marks && course.marks.length >= 2) {
+    const bounds = L.latLngBounds(course.marks.map(m => [m.lat, m.lon]));
+    map.fitBounds(bounds.pad(0.3));
+    mapInitialised = true;
+  }
+}
+
+// ── Boat markers ─────────────────────────────────────────────────────────
+
+function updateBoats(boats, course) {
+  if (!boats) return;
+
+  const seen = new Set();
+
+  boats.forEach(b => {
+    if (!b.lat || !b.lon) return;
+    seen.add(b.mac);
+    const ll = [b.lat, b.lon];
+
+    if (!boatMarkers[b.mac]) {
+      // Create new marker
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="rank-marker" style="background:${b.color}" id="rm-${b.mac.replace(/:/g,'')}">
+                 ${b.rank > 0 ? b.rank : ''}
+               </div>`,
+        iconSize: [28, 28], iconAnchor: [14, 14],
+      });
+      const marker = L.marker(ll, { icon }).addTo(map);
+      marker.bindTooltip('', { permanent: false, className: 'boat-label-tooltip', direction: 'top' });
+      const trail = L.polyline([], { color: b.color, weight: 2, opacity: 0.6 }).addTo(map);
+      boatMarkers[b.mac] = { marker, trail, lastPts: [] };
+      if (!mapInitialised) {
+        map.setView(ll, 15);
+        mapInitialised = true;
+      }
+    }
+
+    const bm = boatMarkers[b.mac];
+    bm.marker.setLatLng(ll);
+
+    // Update icon (rank may have changed)
+    const el = document.getElementById('rm-' + b.mac.replace(/:/g,''));
+    if (el) {
+      el.textContent = b.rank > 0 ? b.rank : '';
+      el.style.background = b.color;
+    }
+
+    // Tooltip
+    const ttLines = [
+      `<b>${b.label}</b>`,
+      statusLabel(b.status) + (b.elapsed_fmt !== '--:--' ? ' · ' + b.elapsed_fmt : ''),
+      b.gap_fmt !== 'Leader' ? b.gap_fmt : '🏆 Leader',
+      b.speed_kmph ? b.speed_kmph.toFixed(1) + ' km/h' : '',
+      b.batt_pct >= 0 ? '🔋 ' + b.batt_pct + '%' : '',
+    ].filter(Boolean).join('<br>');
+    bm.marker.getTooltip().setContent(ttLines);
+
+    // Trail — keep last 50 points
+    bm.lastPts.push(ll);
+    if (bm.lastPts.length > 50) bm.lastPts.shift();
+    bm.trail.setLatLngs(bm.lastPts);
+
+    // Stale
+    bm.marker.getElement() && bm.marker.getElement().classList.toggle('stale', b.age_s > 30);
+  });
+
+  // Remove gone boats
+  Object.keys(boatMarkers).forEach(mac => {
+    if (!seen.has(mac)) {
+      map.removeLayer(boatMarkers[mac].marker);
+      map.removeLayer(boatMarkers[mac].trail);
+      delete boatMarkers[mac];
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Race controls
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function resetRace() {
+  if (!confirm('Reset all boat race states? (Course is kept)')) return;
+  await fetch('/api/race/reset', { method: 'POST' });
+  fetchRace();
+}
+
+async function dnfBoat(mac) {
+  if (!confirm('Mark boat as DNF?')) return;
+  await fetch('/api/race/dnf/' + mac, { method: 'POST' });
+  fetchRace();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Course editor
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toggleEditor() {
+  editorMode = !editorMode;
+  const btn   = document.getElementById('btn-edit');
+  const panel = document.getElementById('editor-panel');
+
+  btn.classList.toggle('active', editorMode);
+  panel.classList.toggle('visible', editorMode);
+
+  if (editorMode) {
+    // Pre-populate draft from current course
+    const course = lastData && lastData.course;
+    if (course) {
+      document.getElementById('course-name-input').value = course.name || '';
+      if (course.start_line) {
+        draft.sl.p1 = { lat: course.start_line.p1.lat, lon: course.start_line.p1.lon };
+        draft.sl.p2 = { lat: course.start_line.p2.lat, lon: course.start_line.p2.lon };
+      }
+      if (course.finish_line) {
+        draft.fl.p1 = { lat: course.finish_line.p1.lat, lon: course.finish_line.p1.lon };
+        draft.fl.p2 = { lat: course.finish_line.p2.lat, lon: course.finish_line.p2.lon };
+      }
+      draft.wps = (course.waypoints || []).map(w => ({ lat: w.lat, lon: w.lon, name: w.name }));
+    }
+    // If start+finish already set, drop into waypoint mode — don't overwrite marks on first click
+    const courseComplete = draft.sl.p1 && draft.sl.p2 && draft.fl.p1 && draft.fl.p2;
+    setTool(courseComplete ? 'wp' : 'sl-p1');
+    redrawDraft();
+    map.getContainer().style.cursor = 'crosshair';
+    map.on('click', onMapClick);
+  } else {
+    activeTool = null;
+    map.off('click', onMapClick);
+    map.getContainer().style.cursor = '';
+    clearDraftLayers();
+    if (lastData) updateCourse(lastData.course);
+  }
+  updateToolButtons();
+}
+
+function setTool(tool) {
+  activeTool = tool;
+  document.getElementById('editor-hint').textContent =
+    { 'sl-p1': 'Click map: Start line mark 1 (port)',
+      'sl-p2': 'Click map: Start line mark 2 (starboard)',
+      'wp':    'Click map to add a waypoint (click again for another)',
+      'fl-p1': 'Click map: Finish line mark 1 (port)',
+      'fl-p2': 'Click map: Finish line mark 2 (starboard)',
+    }[tool] || 'Click on the map to place each mark';
+  updateToolButtons();
+}
+
+function updateToolButtons() {
+  ['sl-p1','sl-p2','wp','fl-p1','fl-p2'].forEach(t => {
+    const btn = document.getElementById('tool-' + t);
+    if (!btn) return;
+    btn.classList.remove('active', 'set');
+    if (t === activeTool) { btn.classList.add('active'); return; }
+    // Show "set" state
+    if (t === 'sl-p1' && draft.sl.p1) btn.classList.add('set');
+    if (t === 'sl-p2' && draft.sl.p2) btn.classList.add('set');
+    if (t === 'fl-p1' && draft.fl.p1) btn.classList.add('set');
+    if (t === 'fl-p2' && draft.fl.p2) btn.classList.add('set');
+    if (t === 'wp' && draft.wps.length > 0) btn.classList.add('set');
+  });
+  const wpBtn = document.getElementById('tool-wp');
+  if (wpBtn && draft.wps.length > 0 && activeTool !== 'wp') {
+    wpBtn.textContent = `WPs (${draft.wps.length})`;
+  } else if (wpBtn) {
+    wpBtn.textContent = '+ Waypoint';
+  }
+}
+
+function onMapClick(e) {
+  if (!activeTool) return;
+  const pt = { lat: e.latlng.lat, lon: e.latlng.lng };
+  if      (activeTool === 'sl-p1') { draft.sl.p1 = pt; setTool('sl-p2'); }
+  else if (activeTool === 'sl-p2') { draft.sl.p2 = pt; setTool('wp'); }
+  else if (activeTool === 'wp')    { draft.wps.push({ ...pt, name: `WP${draft.wps.length+1}` }); }
+  else if (activeTool === 'fl-p1') { draft.fl.p1 = pt; setTool('fl-p2'); }
+  else if (activeTool === 'fl-p2') { draft.fl.p2 = pt; setTool(null); }
+  redrawDraft();
+  updateToolButtons();
+}
+
+function clearWaypoints() {
+  draft.wps = [];
+  redrawDraft();
+  updateToolButtons();
+}
+
+function clearDraftLayers() {
+  draftMarkers.forEach(m => map.removeLayer(m));
+  draftLayers.forEach(l => map.removeLayer(l));
+  draftMarkers = []; draftLayers = [];
+}
+
+function redrawDraft() {
+  clearCourseLayers();
+  clearDraftLayers();
+
+  function mkMark(pt, color, label) {
+    if (!pt) return;
+    const m = L.circleMarker([pt.lat, pt.lon],
+      { radius: 8, color, fillColor: color, fillOpacity: 0.85, weight: 2 }).addTo(map);
+    m.bindTooltip(label, { permanent: true, className: 'boat-label-tooltip', direction: 'top' });
+    draftMarkers.push(m);
+  }
+
+  mkMark(draft.sl.p1, '#58a6ff', 'S-P1');
+  mkMark(draft.sl.p2, '#58a6ff', 'S-P2');
+  mkMark(draft.fl.p1, '#3fb950', 'F-P1');
+  mkMark(draft.fl.p2, '#3fb950', 'F-P2');
+
+  // Waypoints — click to delete individual ones
+  draft.wps.forEach((wp, i) => {
+    const m = L.circleMarker([wp.lat, wp.lon],
+      { radius: 9, color: '#f0883e', fillColor: '#f0883e', fillOpacity: 0.85, weight: 2,
+        bubblingMouseEvents: false   // stop clicks reaching the map
+      }).addTo(map);
+    m.bindTooltip(`${wp.name || 'WP'+(i+1)}<br><small>click to delete</small>`,
+      { permanent: true, className: 'boat-label-tooltip', direction: 'top' });
+    m.on('click', e => {
+      L.DomEvent.stopPropagation(e);   // don't fire map click → add waypoint
+      draft.wps.splice(i, 1);
+      draft.wps.forEach((w, j) => { w.name = `WP${j+1}`; });   // renumber
+      redrawDraft();
+      updateToolButtons();
+    });
+    draftMarkers.push(m);
+  });
+
+  // Start line
+  if (draft.sl.p1 && draft.sl.p2) {
+    const l = L.polyline([[draft.sl.p1.lat, draft.sl.p1.lon], [draft.sl.p2.lat, draft.sl.p2.lon]],
+                          { color: '#58a6ff', weight: 3, dashArray: '8 5' }).addTo(map);
+    draftLayers.push(l);
+  }
+
+  // Finish line
+  if (draft.fl.p1 && draft.fl.p2) {
+    const l = L.polyline([[draft.fl.p1.lat, draft.fl.p1.lon], [draft.fl.p2.lat, draft.fl.p2.lon]],
+                          { color: '#3fb950', weight: 3, dashArray: '8 5' }).addTo(map);
+    draftLayers.push(l);
+  }
+
+  // Course legs
+  const pts = [];
+  if (draft.sl.p1 && draft.sl.p2) {
+    const mid = [(draft.sl.p1.lat+draft.sl.p2.lat)/2, (draft.sl.p1.lon+draft.sl.p2.lon)/2];
+    pts.push(mid);
+  }
+  draft.wps.forEach(wp => pts.push([wp.lat, wp.lon]));
+  if (draft.fl.p1 && draft.fl.p2) {
+    const mid = [(draft.fl.p1.lat+draft.fl.p2.lat)/2, (draft.fl.p1.lon+draft.fl.p2.lon)/2];
+    pts.push(mid);
+  }
+  if (pts.length >= 2) {
+    const smooth = catmullRom(pts);
+    const shadow = L.polyline(smooth, { color: '#000', weight: 4, dashArray: '6 6', opacity: 0.35 }).addTo(map);
+    const l      = L.polyline(smooth, { color: '#fff', weight: 2, dashArray: '6 6', opacity: 0.9 }).addTo(map);
+    draftLayers.push(shadow, l);
+  }
+}
+
+// ── Euclidean distance in degrees (for nearest-node searches only) ──────────
+function _deg2(a, b) {
+  const dlat = a[0]-b[0], dlon = a[1]-b[1];
+  return dlat*dlat + dlon*dlon;
+}
+
+// ── Auto-route: query OSM Overpass for the waterway between start & finish ──
+//
+// Requires start+finish lines to already be set.
+// Finds the nearest river/canal/stream linestring that passes near both ends,
+// extracts nodes between those endpoints, subsamples to ≤20 waypoints, and
+// inserts them as course waypoints so the spline follows the water.
+
+async function autoRoute() {
+  if (!draft.sl.p1 || !draft.sl.p2 || !draft.fl.p1 || !draft.fl.p2) {
+    alert('Set the start and finish lines before auto-routing.');
+    return;
+  }
+
+  const sm = [(draft.sl.p1.lat+draft.sl.p2.lat)/2, (draft.sl.p1.lon+draft.sl.p2.lon)/2];
+  const fm = [(draft.fl.p1.lat+draft.fl.p2.lat)/2, (draft.fl.p1.lon+draft.fl.p2.lon)/2];
+
+  // Bounding box that covers both lines with 20% padding
+  const pad = Math.max(Math.abs(sm[0]-fm[0]), Math.abs(sm[1]-fm[1])) * 0.25 + 0.003;
+  const minLat = Math.min(sm[0],fm[0]) - pad, maxLat = Math.max(sm[0],fm[0]) + pad;
+  const minLon = Math.min(sm[1],fm[1]) - pad, maxLon = Math.max(sm[1],fm[1]) + pad;
+
+  const btn = document.getElementById('btn-autoroute');
+  btn.textContent = '⏳ Querying…'; btn.disabled = true;
+
+  try {
+    // Ask Overpass for river/canal/stream centrelines with node geometry
+    const query =
+      `[out:json][timeout:20];`+
+      `(way["waterway"~"^(river|canal|stream|tidal_channel)$"](${minLat},${minLon},${maxLat},${maxLon}););`+
+      `out geom;`;
+
+    const res = await fetch('https://overpass-api.de/api/interpreter',
+                            { method:'POST', body:query });
+    if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (!data.elements || data.elements.length === 0) {
+      alert('No waterway found in this area.\nCheck that your start/finish are on or near a mapped river or canal.');
+      return;
+    }
+
+    // For each OSM way, score it by (dist to start + dist to finish)
+    // using the closest node in each way.
+    let bestWay = null, bestScore = Infinity;
+    for (const way of data.elements) {
+      if (!way.geometry || way.geometry.length < 2) continue;
+      const nodes = way.geometry.map(n => [n.lat, n.lon]);
+      const dStart  = Math.min(...nodes.map(n => _deg2(n, sm)));
+      const dFinish = Math.min(...nodes.map(n => _deg2(n, fm)));
+      const score = dStart + dFinish;
+      if (score < bestScore) { bestScore = score; bestWay = nodes; }
+    }
+
+    if (!bestWay) { alert('Could not match a waterway — try placing start/finish closer to the water.'); return; }
+
+    // Find indices of the nodes closest to start-mid and finish-mid
+    let si = 0, fi = 0, minS = Infinity, minF = Infinity;
+    bestWay.forEach((n, i) => {
+      const ds = _deg2(n, sm), df = _deg2(n, fm);
+      if (ds < minS) { minS = ds; si = i; }
+      if (df < minF) { minF = df; fi = i; }
+    });
+
+    // Slice nodes between start-node and finish-node (exclusive of endpoints
+    // since those are represented by the start/finish line midpoints already)
+    let inner;
+    if (si < fi) inner = bestWay.slice(si+1, fi);
+    else         inner = bestWay.slice(fi+1, si).reverse();
+
+    if (inner.length === 0) {
+      alert('Start and finish appear to be on the same waterway node — no intermediate waypoints needed.');
+      draft.wps = [];
+    } else {
+      // Subsample to max 20 waypoints so the leaderboard distance calc stays clean
+      const MAX = 20;
+      const step = inner.length > MAX ? inner.length / MAX : 1;
+      const sampled = inner.filter((_, i) => i % Math.max(1, Math.round(step)) === 0);
+      draft.wps = sampled.map((n, i) => ({ lat: n[0], lon: n[1], name: `WP${i+1}` }));
+    }
+
+    redrawDraft();
+    updateToolButtons();
+    document.getElementById('editor-hint').textContent =
+      `Auto-routed: ${draft.wps.length} waypoints placed along waterway — Save when happy.`;
+
+  } catch(e) {
+    alert('Auto-route failed: ' + e.message);
+  } finally {
+    btn.textContent = '🌊 Auto-route'; btn.disabled = false;
+  }
+}
+
+async function saveCourse() {
+  if (!draft.sl.p1 || !draft.sl.p2) { alert('Set both start line marks first.'); return; }
+  if (!draft.fl.p1 || !draft.fl.p2) { alert('Set both finish line marks first.'); return; }
+
+  const payload = {
+    name: document.getElementById('course-name-input').value.trim() || 'Race Course',
+    start_line:  { p1: { lat: draft.sl.p1.lat, lon: draft.sl.p1.lon },
+                   p2: { lat: draft.sl.p2.lat, lon: draft.sl.p2.lon }, name: 'Start' },
+    finish_line: { p1: { lat: draft.fl.p1.lat, lon: draft.fl.p1.lon },
+                   p2: { lat: draft.fl.p2.lat, lon: draft.fl.p2.lon }, name: 'Finish' },
+    waypoints:   draft.wps.map(w => ({ lat: w.lat, lon: w.lon, name: w.name })),
+  };
+
+  const r = await fetch('/api/race/course', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const j = await r.json();
+  if (j.ok) {
+    toggleEditor();   // exit editor mode
+    await refreshCourseSelector();
+    fetchRace();
+    document.getElementById('editor-hint').textContent = 'Course saved!';
+  } else {
+    alert('Error saving course: ' + (j.error || 'unknown'));
+  }
+}
+</script>
+</body>
+</html>

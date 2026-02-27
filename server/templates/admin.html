@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Mesh — Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1c2128;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --text-dim:  #8b949e;
+      --accent:    #238636;
+      --warn:      #d29922;
+      --err:       #da3633;
+      --blue:      #388bfd;
+      --hdr-h:     52px;
+    }
+
+    html, body {
+      min-height: 100%;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      height: var(--hdr-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    }
+    header h1 { font-size: 17px; font-weight: 600; white-space: nowrap; }
+    header h1 span { color: var(--text-dim); font-weight: 400; font-size: 13px; margin-left: 6px; }
+
+    .hdr-link {
+      margin-left: auto;
+      color: var(--blue); text-decoration: none; font-size: 13px;
+      padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .hdr-link:hover { background: var(--surface2); }
+
+    .gw-badge {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 20px;
+      background: var(--bg); border: 1px solid var(--border);
+      font-size: 12px; white-space: nowrap;
+    }
+    .gw-badge .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--err); transition: background 0.3s;
+    }
+    .gw-badge.online .dot { background: var(--accent); }
+
+    /* ------------------------------------------------------------------ */
+    /* Main layout                                                          */
+    /* ------------------------------------------------------------------ */
+    main { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Stats strip                                                          */
+    /* ------------------------------------------------------------------ */
+    .stats-strip {
+      display: flex; gap: 12px; flex-wrap: wrap;
+    }
+    .stat-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 18px; min-width: 130px;
+    }
+    .stat-box .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
+    .stat-box .val   { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat-box .val.ok   { color: #3fb950; }
+    .stat-box .val.warn { color: var(--warn); }
+    .stat-box .val.err  { color: var(--err); }
+
+    /* ------------------------------------------------------------------ */
+    /* Section card                                                         */
+    /* ------------------------------------------------------------------ */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim);
+    }
+    .card-header b { color: var(--text); font-size: 14px; text-transform: none; letter-spacing: 0; }
+
+    /* ------------------------------------------------------------------ */
+    /* Tables                                                               */
+    /* ------------------------------------------------------------------ */
+    .tbl-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    th {
+      background: var(--surface2); color: var(--text-dim);
+      font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 8px 10px; text-align: left; white-space: nowrap;
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0;
+    }
+    td {
+      padding: 7px 10px; border-bottom: 1px solid rgba(48,54,61,0.5);
+      white-space: nowrap; vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+
+    .dot-inline {
+      display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+      margin-right: 5px; vertical-align: middle;
+      box-shadow: 0 0 5px currentColor;
+    }
+
+    .badge {
+      display: inline-block; padding: 2px 7px; border-radius: 10px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .badge-tracker { background: rgba(255,0,0,0.15); color: #ff6b6b; border: 1px solid rgba(255,0,0,0.3); }
+    .badge-relay   { background: rgba(0,255,0,0.1);  color: #3fb950; border: 1px solid rgba(0,255,0,0.25); }
+    .badge-gateway { background: rgba(56,139,253,0.15); color: #79b8ff; border: 1px solid rgba(56,139,253,0.3); }
+
+    .fix-yes  { color: #3fb950; }
+    .fix-no   { color: var(--err); }
+    .fix-stale{ color: var(--warn); }
+
+    /* ------------------------------------------------------------------ */
+    /* RSSI signal bar                                                      */
+    /* ------------------------------------------------------------------ */
+    .rssi-cell { display: flex; align-items: center; gap: 6px; }
+    .rssi-bar  {
+      display: flex; align-items: flex-end; gap: 2px; height: 14px;
+    }
+    .rssi-bar span {
+      display: block; width: 4px; border-radius: 1px 1px 0 0;
+      background: var(--border);
+    }
+    .rssi-bar span.lit { }
+    .rssi-bar span:nth-child(1) { height: 4px; }
+    .rssi-bar span:nth-child(2) { height: 7px; }
+    .rssi-bar span:nth-child(3) { height: 10px; }
+    .rssi-bar span:nth-child(4) { height: 14px; }
+
+    .rssi-good   { color: #3fb950; }
+    .rssi-ok     { color: #79b8ff; }
+    .rssi-warn   { color: var(--warn); }
+    .rssi-poor   { color: var(--err); }
+
+    /* ------------------------------------------------------------------ */
+    /* Frame log specifics                                                  */
+    /* ------------------------------------------------------------------ */
+    #log-wrap {
+      max-height: 400px; overflow-y: auto; overflow-x: auto;
+    }
+    #log-wrap table { min-width: 900px; }
+
+    .log-gps  { color: #79b8ff; }
+    .log-hb   { color: #3fb950; }
+    .log-gw   { color: #d2a679; }
+    .log-drop { color: var(--err); }
+
+    .mono { font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; color: var(--text-dim); }
+
+    /* ------------------------------------------------------------------ */
+    /* Auto-refresh toggle                                                  */
+    /* ------------------------------------------------------------------ */
+    .toggle-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .toggle-row label { color: var(--text-dim); cursor: pointer; user-select: none; }
+    input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+
+    .refresh-blink {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+      opacity: 0; transition: opacity 0.1s;
+    }
+    .refresh-blink.active { opacity: 1; }
+
+    /* ------------------------------------------------------------------ */
+    /* Empty state                                                          */
+    /* ------------------------------------------------------------------ */
+    .empty { padding: 24px; text-align: center; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Mesh Admin <span>ESP32 V2</span></h1>
+
+  <div class="gw-badge" id="gw-badge">
+    <div class="dot"></div>
+    <span id="gw-label">Gateway offline</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+    <span id="refresh-blink" class="refresh-blink"></span>
+    <a class="hdr-link" href="/">Race Dashboard</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- Stats strip -->
+  <div class="stats-strip" id="stats-strip">
+    <div class="stat-box"><div class="label">Nodes</div><div class="val" id="s-nodes">—</div></div>
+    <div class="stat-box"><div class="label">Frames RX</div><div class="val ok" id="s-frames">—</div></div>
+    <div class="stat-box"><div class="label">Dropped</div><div class="val" id="s-dropped">—</div></div>
+    <div class="stat-box"><div class="label">GW Uptime</div><div class="val" id="s-uptime">—</div></div>
+    <div class="stat-box"><div class="label">Free Heap</div><div class="val" id="s-heap">—</div></div>
+    <div class="stat-box"><div class="label">Serial Port</div><div class="val" id="s-port" style="font-size:16px">—</div></div>
+  </div>
+
+  <!-- Gateway link quality card -->
+  <div class="card" id="gw-links-card" style="display:none">
+    <div class="card-header"><b>Gateway Links</b><span style="color:var(--text-dim);font-size:11px">as heard by the gateway</span></div>
+    <div style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px" id="gw-links-body"></div>
+  </div>
+
+  <!-- Node table -->
+  <div class="card">
+    <div class="card-header">
+      <b>Live Nodes</b>
+      <div class="toggle-row">
+        <label><input type="checkbox" id="chk-autorefresh" checked> Auto-refresh 2s</label>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table id="node-table">
+        <thead>
+          <tr>
+            <th>Node</th>
+            <th>MAC</th>
+            <th>Role</th>
+            <th>GPS</th>
+            <th>Lat</th>
+            <th>Lon</th>
+            <th>Alt m</th>
+            <th>Speed km/h</th>
+            <th>Heading</th>
+            <th>Sats</th>
+            <th>HDOP</th>
+            <th>Peers (RSSI)</th>
+            <th>Batt mV</th>
+            <th>Batt %</th>
+            <th>Nodes seen</th>
+            <th>Uptime</th>
+            <th>Hop</th>
+            <th>Seq</th>
+            <th>GPS pkts</th>
+            <th>HB pkts</th>
+            <th>Age</th>
+            <th>FW Ver</th>
+          </tr>
+        </thead>
+        <tbody id="node-tbody">
+          <tr><td colspan="22" class="empty">Waiting for nodes…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Frame log -->
+  <div class="card">
+    <div class="card-header">
+      <b>Frame Log</b>
+      <span id="log-count" style="color:var(--text-dim)">0 frames</span>
+    </div>
+    <div id="log-wrap">
+      <table id="log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Node</th>
+            <th>MAC</th>
+            <th>Hop</th>
+            <th>Seq</th>
+            <th>Details</th>
+            <th>Len</th>
+            <th>Raw (hex)</th>
+          </tr>
+        </thead>
+        <tbody id="log-tbody">
+          <tr><td colspan="9" class="empty">No frames yet…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function fmtUptime(s) {
+  if (!s && s !== 0) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + sec + 's';
+  return sec + 's';
+}
+function fmtAge(a) {
+  if (a < 2)  return '<b>now</b>';
+  if (a < 60) return Math.round(a) + 's';
+  return Math.round(a / 60) + 'm';
+}
+function fmtHeap(b) {
+  return b ? (b / 1024).toFixed(0) + ' KB' : '—';
+}
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  const ms = String(d.getMilliseconds()).padStart(3,'0');
+  return hh + ':' + mm + ':' + ss + '.' + ms;
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+}
+function roleBadge(roleName) {
+  const cls = {Tracker:'badge-tracker', Relay:'badge-relay', Gateway:'badge-gateway'}[roleName] || 'badge-relay';
+  return '<span class="badge ' + cls + '">' + roleName + '</span>';
+}
+
+function rssiMeta(v) {
+  // Returns { cls, bars } based on dBm value
+  // bars = number of lit bars (1-4)
+  if (!v || v === 0) return null;
+  if (v >= -55) return { cls: 'rssi-good', bars: 4, label: 'Excellent' };
+  if (v >= -67) return { cls: 'rssi-ok',   bars: 3, label: 'Good' };
+  if (v >= -78) return { cls: 'rssi-warn', bars: 2, label: 'Fair' };
+  return              { cls: 'rssi-poor',  bars: 1, label: 'Weak' };
+}
+
+function fmtRssi(v) {
+  const m = rssiMeta(v);
+  if (!m) return '—';
+  let barHtml = '<div class="rssi-bar">';
+  for (let i = 1; i <= 4; i++) {
+    barHtml += '<span' + (i <= m.bars ? ' class="lit" style="background:currentColor"' : '') + '></span>';
+  }
+  barHtml += '</div>';
+  return '<span class="rssi-cell ' + m.cls + '" title="' + m.label + ': ' + v + ' dBm">' +
+         barHtml + '<span>' + v + ' dBm</span></span>';
+}
+
+// Per-peer RSSI: renders stacked rows, one per peer the node has heard
+function fmtPeerRssi(peerRssi, allNodes) {
+  const entries = Object.entries(peerRssi || {});
+  if (entries.length === 0) return '<span style="color:var(--text-dim)">—</span>';
+  return entries.map(([mac, rssi]) => {
+    const peer = allNodes[mac];
+    const dot  = peer
+      ? '<span class="dot-inline" style="background:' + peer.color + ';color:' + peer.color + '"></span><span style="margin-right:4px">' + esc(peer.label) + '</span>'
+      : '<span style="font-size:10px;color:var(--text-dim);margin-right:4px">' + mac.slice(-8) + '</span>';
+    return '<div style="display:flex;align-items:center;gap:2px;white-space:nowrap;margin-bottom:2px">' +
+           dot + fmtRssi(rssi) + '</div>';
+  }).join('');
+}
+
+// Gateway link quality mini-badge (used in the Gateway Links card)
+function fmtGwLink(mac, rssi, allNodes) {
+  const peer = allNodes[mac];
+  const label = peer ? peer.label : mac.slice(-8);
+  const color = peer ? peer.color : '#888';
+  const m = rssiMeta(rssi);
+  const cls = m ? m.cls : '';
+  return '<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;' +
+         'background:var(--surface2);border:1px solid var(--border);border-radius:6px">' +
+         '<span class="dot-inline" style="background:' + color + ';color:' + color + '"></span>' +
+         '<span style="font-weight:600">' + esc(label) + '</span>' +
+         fmtRssi(rssi) + '</div>';
+}
+
+// ---------------------------------------------------------------------------
+// State render
+// ---------------------------------------------------------------------------
+function renderStats(gw, nodes) {
+  const badge = document.getElementById('gw-badge');
+  const label = document.getElementById('gw-label');
+  badge.classList.toggle('online', gw.connected);
+  label.textContent = gw.connected ? 'Gateway: ' + gw.port : 'Gateway offline';
+
+  document.getElementById('s-nodes').textContent   = gw.node_count || 0;
+  document.getElementById('s-frames').textContent  = gw.frames_received || 0;
+  const dropped = gw.frames_dropped || 0;
+  const dEl = document.getElementById('s-dropped');
+  dEl.textContent = dropped;
+  dEl.className = 'val ' + (dropped > 0 ? 'warn' : 'ok');
+  document.getElementById('s-uptime').textContent  = fmtUptime(gw.uptime_s);
+  document.getElementById('s-heap').textContent    = fmtHeap(gw.free_heap);
+  document.getElementById('s-port').textContent    = gw.port || '—';
+
+  // Gateway Links card — shows RSSI from the gateway's perspective
+  const gwLinks = gw.peer_rssi || {};
+  const gwLinksCard = document.getElementById('gw-links-card');
+  const gwLinksBody = document.getElementById('gw-links-body');
+  const gwEntries = Object.entries(gwLinks);
+  gwLinksCard.style.display = gwEntries.length > 0 ? '' : 'none';
+  gwLinksBody.innerHTML = gwEntries
+    .sort((a, b) => b[1] - a[1])  // strongest first
+    .map(([mac, rssi]) => fmtGwLink(mac, rssi, nodes))
+    .join('');
+}
+
+function renderNodes(nodes) {
+  const tbody = document.getElementById('node-tbody');
+  const list = Object.values(nodes).sort((a,b) => a.role - b.role || a.device_id - b.device_id);
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="22" class="empty">No nodes seen yet…</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(n => {
+    const fixCls = n.is_stale ? 'fix-stale' : (n.has_gps ? 'fix-yes' : 'fix-no');
+    const fixTxt = n.is_stale ? 'stale' : (n.has_gps ? 'yes' : 'no');
+    const batt   = n.batt_pct === -1 ? 'USB' : (n.batt_pct + '%');
+    const battMv = n.batt_mv  || '—';
+    return '<tr>' +
+      '<td><span class="dot-inline" style="background:' + n.color + ';color:' + n.color + '"></span>' + esc(n.label) + '</td>' +
+      '<td class="mono">' + esc(n.mac) + '</td>' +
+      '<td>' + roleBadge(n.role_name) + '</td>' +
+      '<td class="' + fixCls + '">' + fixTxt + '</td>' +
+      '<td>' + (n.has_gps ? n.lat.toFixed(6) : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.lon.toFixed(6) : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.alt_m.toFixed(1) : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.speed_kmph.toFixed(1) : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.heading_deg.toFixed(0) + '°' : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.satellites : '—') + '</td>' +
+      '<td>' + (n.has_gps ? n.hdop.toFixed(1) : '—') + '</td>' +
+      '<td style="min-width:160px">' + fmtPeerRssi(n.peer_rssi, nodes) + '</td>' +
+      '<td>' + battMv + '</td>' +
+      '<td>' + batt + '</td>' +
+      '<td>' + n.nodes_seen + '</td>' +
+      '<td>' + fmtUptime(n.uptime_s) + '</td>' +
+      '<td>' + n.hop_count + '</td>' +
+      '<td>' + n.seq_num + '</td>' +
+      '<td>' + n.gps_count + '</td>' +
+      '<td>' + n.hb_count + '</td>' +
+      '<td>' + fmtAge(n.age_s) + '</td>' +
+      '<td>' + esc(n.fw_version || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderLog(entries) {
+  document.getElementById('log-count').textContent = entries.length + ' frames';
+  const tbody = document.getElementById('log-tbody');
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No frames yet…</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entries.map(e => {
+    const isGps  = e.type_name === 'GPS';
+    const isHb   = e.type_name === 'HB';
+    const isGw   = e.type_name === 'GW-Status';
+    const isDrop = e.dropped;
+
+    const rowCls = isGps ? 'log-gps' : isHb ? 'log-hb' : isGw ? 'log-gw' : isDrop ? 'log-drop' : '';
+
+    let details = '';
+    if (isGps)  details = 'lat=' + e.lat + ' lon=' + e.lon + ' ' + e.speed_kmph + 'km/h sats=' + e.sats + ' hdop=' + e.hdop + '  ' + fmtRssi(e.rssi);
+    else if (isHb)  details = 'role=' + e.role_name + ' nodes=' + e.nodes_seen + ' uptime=' + fmtUptime(e.uptime_s) + '  ' + fmtRssi(e.rssi);
+    else if (isGw)  details = 'nodes=' + e.node_count + ' uptime=' + fmtUptime(e.uptime_s) + ' heap=' + fmtHeap(e.free_heap);
+    else if (isDrop) details = 'dropped — bad length';
+
+    const dot = e.color ? '<span class="dot-inline" style="background:' + e.color + ';color:' + e.color + '"></span>' : '';
+
+    const hexStr = e.hex ? e.hex.replace(/(..)/g, '$1 ').trim() : '';
+
+    return '<tr class="' + rowCls + '">' +
+      '<td class="mono">' + fmtTime(e.t) + '</td>' +
+      '<td><b>' + esc(e.type_name) + '</b></td>' +
+      '<td>' + dot + esc(e.label || '—') + '</td>' +
+      '<td class="mono">' + esc(e.mac || '—') + '</td>' +
+      '<td>' + (e.hop_count !== undefined ? e.hop_count : '—') + '</td>' +
+      '<td>' + (e.seq_num   !== undefined ? e.seq_num   : '—') + '</td>' +
+      '<td>' + details + '</td>' +
+      '<td>' + e.len + '</td>' +
+      '<td class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="' + hexStr + '">' + hexStr + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Polling
+// ---------------------------------------------------------------------------
+let pollOk = false;
+
+async function pollState() {
+  try {
+    const resp = await fetch('/api/state');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!pollOk) { pollOk = true; }
+    renderStats(data.gateway || {}, data.nodes || {});
+    renderNodes(data.nodes   || {});
+  } catch (e) {
+    pollOk = false;
+    renderStats({ connected: false }, {});
+  }
+}
+
+async function pollLog() {
+  try {
+    const resp = await fetch('/api/log?limit=100');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    renderLog(data);
+  } catch (e) { /* silent */ }
+}
+
+async function pollAll() {
+  if (!document.getElementById('chk-autorefresh').checked) return;
+  const blink = document.getElementById('refresh-blink');
+  blink.classList.add('active');
+  await Promise.all([pollState(), pollLog()]);
+  setTimeout(() => blink.classList.remove('active'), 150);
+}
+
+// Initial load then interval
+pollState();
+pollLog();
+setInterval(pollAll, 2000);
+</script>
+
+</body>
+</html>

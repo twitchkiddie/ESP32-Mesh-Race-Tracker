@@ -1,0 +1,62 @@
+# IDE files
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# Build files
+build/
+.pio/
+*.o
+*.a
+*.hex
+*.bin
+
+# Dependencies
+.pio/libdeps/
+.pio/packages/
+
+# Environment files
+.env
+*.env
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 
+
+# Logfiles and runtime output
+*.dat
+*.log
+*.txt
+ota_log.txt
+role_out.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Server runtime files (user-specific, not source)
+server/race_config.json
+
+# Windows artifacts
+nul
+
+# V1 legacy files (old painlessMesh .ino based implementation)
+*.ino
+mesh_monitor.py
+ota_manager.py
+verify_compilation.ps1
+/static/
+/templates/
+*.json
+*.csv
+OTA_README.md
+README_REFACTORED.md
+README_mesh_monitor.md
