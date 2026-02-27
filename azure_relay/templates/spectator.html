@@ -258,6 +258,7 @@ const GMAPS_KEY = '{{ gmaps_key }}';
 let nodes      = {};
 let cloudStale = true;
 let cloudAgeS  = null;
+let raceState  = null;   // data.race from relay (standings + course)
 
 let mapMarkers  = {};   // mac → leaflet marker
 let mapTrails   = {};   // mac → leaflet polyline
@@ -266,6 +267,7 @@ let gmapsTrails  = {};
 let useGmaps = false;
 let leafletMap, googleMap;
 let currentLeafletLayer = null;
+let courseLayer = null;  // {startLine, finishLine, startMark, finishMark, courseName}
 
 // When cloud feed is stale, dim map markers to this opacity
 const STALE_OPACITY = 0.35;
@@ -329,24 +331,29 @@ window.initGoogleMaps = initGoogleMaps;
 // ---------------------------------------------------------------------------
 function markerOpacity() { return cloudStale ? STALE_OPACITY : 1.0; }
 
-function colorToLeafletIcon(color, label) {
+function colorToLeafletIcon(color, label, headingDeg) {
+  // Arrow points north (up) at 0°, rotates clockwise with heading.
+  // Number badge counter-rotates so it always reads upright.
+  const rot = headingDeg != null ? headingDeg : 0;
   const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' width='32' height='42' viewBox='0 0 32 42'>
-      <filter id='shadow'><feDropShadow dx='0' dy='2' stdDeviation='2' flood-opacity='0.5'/></filter>
-      <path filter='url(#shadow)'
-            d='M16 0 C8 0 2 6 2 14 C2 24 16 42 16 42 C16 42 30 24 30 14 C30 6 24 0 16 0Z'
-            fill='${color}' stroke='#fff' stroke-width='2'/>
-      <text x='16' y='18' text-anchor='middle' fill='white' font-size='11'
+    <svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'>
+      <filter id='sh'><feDropShadow dx='0' dy='1' stdDeviation='1.5' flood-opacity='0.45'/></filter>
+      <g transform='rotate(${rot},22,22)' filter='url(#sh)'>
+        <polygon points='22,4 33,38 22,29 11,38'
+                 fill='${color}' stroke='white' stroke-width='2'/>
+      </g>
+      <circle cx='22' cy='22' r='10' fill='rgba(0,0,0,0.55)' stroke='white' stroke-width='1.5'/>
+      <text x='22' y='26' text-anchor='middle' fill='white' font-size='11'
             font-weight='bold' font-family='sans-serif'>${label}</text>
     </svg>`;
-  return L.divIcon({ html: svg, iconSize: [32,42], iconAnchor: [16,42], popupAnchor: [0,-42], className: '' });
+  return L.divIcon({ html: svg, iconSize: [44,44], iconAnchor: [22,22], popupAnchor: [0,-22], className: '' });
 }
 
 function updateLeafletMarker(node) {
   if (!leafletMap || !node.has_gps) return;
   const mac = node.mac;
   const latlng = [node.lat, node.lon];
-  const icon   = colorToLeafletIcon(node.color, String(node.device_id));
+  const icon   = colorToLeafletIcon(node.color, String(node.device_id), node.heading_deg);
   const popup  = buildPopupHtml(node);
   const op     = markerOpacity();
 
@@ -399,6 +406,54 @@ function refreshMarkerOpacity() {
   const op = markerOpacity();
   Object.values(mapMarkers).forEach(m => m.setOpacity(op));
   Object.values(mapTrails).forEach(t => t.setStyle({ opacity: op * 0.7 }));
+}
+
+// ---------------------------------------------------------------------------
+// Course overlay — start line (green) + finish line (red)
+// ---------------------------------------------------------------------------
+
+function makeLineMarker(label, color) {
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'>
+      <circle cx='14' cy='14' r='12' fill='${color}' stroke='white' stroke-width='2'/>
+      <text x='14' y='18' text-anchor='middle' fill='white' font-size='11'
+            font-weight='bold' font-family='sans-serif'>${label}</text>
+    </svg>`;
+  return L.divIcon({ html: svg, iconSize: [28,28], iconAnchor: [14,14], className: '' });
+}
+
+function drawCourse(course) {
+  // Clear existing course layers
+  if (courseLayer) {
+    ['startLine','finishLine','startMark','finishMark'].forEach(k => {
+      if (courseLayer[k]) courseLayer[k].remove();
+    });
+    courseLayer = null;
+  }
+  if (!course || !leafletMap) return;
+
+  const sl = course.start_line, fl = course.finish_line;
+  if (!sl || !fl) return;
+
+  const startLine  = L.polyline([[sl.p1.lat, sl.p1.lon],[sl.p2.lat, sl.p2.lon]],
+    { color: '#00cc44', weight: 3, opacity: 0.85 }).addTo(leafletMap);
+  const finishLine = L.polyline([[fl.p1.lat, fl.p1.lon],[fl.p2.lat, fl.p2.lon]],
+    { color: '#ff3333', weight: 3, opacity: 0.85 }).addTo(leafletMap);
+
+  const sMid = [(sl.p1.lat + sl.p2.lat) / 2, (sl.p1.lon + sl.p2.lon) / 2];
+  const fMid = [(fl.p1.lat + fl.p2.lat) / 2, (fl.p1.lon + fl.p2.lon) / 2];
+
+  const startMark  = L.marker(sMid,  { icon: makeLineMarker('S', '#00cc44') }).addTo(leafletMap);
+  const finishMark = L.marker(fMid,  { icon: makeLineMarker('F', '#ff3333') }).addTo(leafletMap);
+
+  courseLayer = { startLine, finishLine, startMark, finishMark, courseName: course.name };
+}
+
+function syncCourse() {
+  const course = raceState && raceState.course ? raceState.course : null;
+  const newName = course ? course.name : null;
+  const oldName = courseLayer ? courseLayer.courseName : null;
+  if (newName !== oldName) drawCourse(course);
 }
 
 function buildPopupHtml(node) {
@@ -465,23 +520,54 @@ function compassDir(deg) {
   return dirs[Math.round((deg % 360) / 22.5) % 16];
 }
 
-function renderPanel() {
-  const list    = document.getElementById('node-list');
-  const noNodes = document.getElementById('no-nodes');
-  const count   = Object.keys(nodes).length;
-  document.getElementById('panel-count').textContent = count;
+function rankLabel(rank) {
+  if (rank <= 0) return '';
+  const sfx = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+  const col  = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : '#666';
+  return `<span style="background:${col};color:#111;padding:1px 7px;border-radius:10px;
+                font-size:11px;font-weight:bold;margin-right:4px">${rank}${sfx}</span>`;
+}
 
-  if (count === 0) {
+function renderPanel() {
+  const list      = document.getElementById('node-list');
+  const noNodes   = document.getElementById('no-nodes');
+  const hdr       = document.querySelector('#panel-header span:first-child');
+  const raceBoats = raceState && raceState.boats && raceState.boats.length > 0;
+  const raceActive = raceState && (raceState.race_active || raceState.race_finished);
+
+  // Panel title
+  if (hdr) hdr.textContent = raceActive ? 'Race Standings' : 'Live Boats';
+
+  // Build display list
+  let displayList;
+  if (raceBoats) {
+    // Merge race boat data with live node data; skip boats not in nodes (no GPS yet)
+    displayList = raceState.boats
+      .filter(b => b.status !== 'dnf' && nodes[b.mac])
+      .map(b => ({ ...nodes[b.mac], _race: b }))
+      .sort((a, b) => {
+        const ra = a._race.rank || 999, rb = b._race.rank || 999;
+        return ra !== rb ? ra - rb : a.device_id - b.device_id;
+      });
+    // Append any tracker nodes not in race boats list
+    Object.values(nodes).forEach(n => {
+      if (!displayList.some(d => d.mac === n.mac)) displayList.push(n);
+    });
+  } else {
+    displayList = Object.values(nodes).sort((a, b) =>
+      a.device_id - b.device_id);
+  }
+
+  document.getElementById('panel-count').textContent = displayList.length;
+
+  if (displayList.length === 0) {
     noNodes.style.display = '';
     list.querySelectorAll('.node-card').forEach(el => el.remove());
     return;
   }
   noNodes.style.display = 'none';
 
-  const sorted = Object.values(nodes).sort((a, b) =>
-    a.role !== b.role ? a.role - b.role : a.device_id - b.device_id);
-
-  sorted.forEach(node => {
+  displayList.forEach(node => {
     const id = `card-${node.mac.replace(/:/g, '')}`;
     let card = document.getElementById(id);
     if (!card) {
@@ -496,11 +582,12 @@ function renderPanel() {
     const hdg  = node.heading_deg != null
                    ? `${node.heading_deg.toFixed(0)}° ${compassDir(node.heading_deg)}`
                    : '—';
+    const r    = node._race;
 
     card.innerHTML = `
       <div class="node-header">
         <div class="node-dot" style="background:${node.color};color:${node.color}"></div>
-        <span class="node-name">${name}</span>
+        <span class="node-name">${r ? rankLabel(r.rank) : ''}${name}</span>
         <span class="node-age">${fmtAge(node.age_s)}</span>
       </div>
       <div class="node-grid">
@@ -508,6 +595,9 @@ function renderPanel() {
         <span class="label full val">${fmtSpeed(node)}</span>
         <span class="label">Heading</span>
         <span class="val">${hdg}</span>
+        ${r && r.gap_fmt ? `
+        <span class="label">Gap</span>
+        <span class="val" style="color:${r.rank===1?'#3fb950':'var(--text)'}">${r.gap_fmt}</span>` : ''}
         <span class="label full" style="color:var(--text-dim);font-size:11px">
           ${node.lat.toFixed(5)}, ${node.lon.toFixed(5)}
         </span>` : `
@@ -515,9 +605,9 @@ function renderPanel() {
       </div>`;
   });
 
-  // Remove cards for nodes that no longer exist
+  // Remove cards for nodes that no longer exist in displayList
   list.querySelectorAll('.node-card').forEach(card => {
-    const found = sorted.some(n => `card-${n.mac.replace(/:/g, '')}` === card.id);
+    const found = displayList.some(n => `card-${n.mac.replace(/:/g, '')}` === card.id);
     if (!found) card.remove();
   });
 }
@@ -581,6 +671,10 @@ async function poll() {
 
     cloudAgeS  = data.cloud_age_s != null ? data.cloud_age_s : null;
     cloudStale = data.cloud_stale !== false;   // default true if missing
+    raceState  = data.race || null;
+
+    // Sync start/finish course lines onto map
+    syncCourse();
 
     // Remove map markers for any node no longer in the tracker set
     [...Object.keys(mapMarkers)].forEach(mac => {

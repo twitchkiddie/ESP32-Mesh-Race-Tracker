@@ -234,8 +234,15 @@ def main():
     bridge.start()
 
     # Optional cloud relay push (disabled if --cloud-url / CLOUD_URL not set)
+    # Push includes full node state + race standings + course so the
+    # spectator page can show arrow markers, start/finish lines, and rankings.
+    def get_cloud_state():
+        state = bridge.get_state()
+        state['race'] = engine.get_race_state(state['nodes'])
+        return state
+
     cloud = CloudPush(url=args.cloud_url, secret=args.cloud_secret)
-    cloud.set_state_fn(bridge.get_state)
+    cloud.set_state_fn(get_cloud_state)
     cloud.start()
 
     logger.info('[Server] Dashboard at http://localhost:%d/', args.web_port)
