@@ -48,6 +48,9 @@ server/race_config.json
 # Windows artifacts
 nul
 
+# Legacy archive (V1 files kept for reference before deletion)
+/_archive/
+
 # V1 legacy files (old painlessMesh .ino based implementation)
 *.ino
 mesh_monitor.py
