@@ -477,6 +477,7 @@ function fmtGwLink(mac, rssi, allNodes) {
 // ---------------------------------------------------------------------------
 
 function startNameEdit(mac, cell) {
+  namingMac = mac;
   // Replace cell content with an input
   const current = (cell.querySelector('span:first-child') || {}).textContent || '';
   const clean = current === 'add name…' ? '' : current;
@@ -488,11 +489,12 @@ function startNameEdit(mac, cell) {
 
 function nameKey(e, mac, input) {
   if (e.key === 'Enter')  { e.preventDefault(); commitName(mac, input); }
-  if (e.key === 'Escape') { renderNodes(lastNodes); }  // cancel
+  if (e.key === 'Escape') { namingMac = null; renderNodes(lastNodes); }  // cancel
 }
 
 async function commitName(mac, input) {
   const name = input.value.trim();
+  namingMac = null;
   try {
     await fetch('/api/node/' + mac + '/name', {
       method: 'POST',
@@ -510,6 +512,7 @@ async function commitName(mac, input) {
 // ---------------------------------------------------------------------------
 
 async function changeDeviceId(mac, sel) {
+  focusedSelectMac = null;
   const newId = parseInt(sel.value, 10);
   try {
     const resp = await fetch('/api/node/' + mac + '/id', {
@@ -527,11 +530,13 @@ async function changeDeviceId(mac, sel) {
 // ---------------------------------------------------------------------------
 // Filter state
 // ---------------------------------------------------------------------------
-let activeRoleFilter = 'all';
-let activeTypeFilter = 'all';
-let logPaused = false;
-let lastNodes  = {};
-let lastLog    = [];
+let activeRoleFilter  = 'all';
+let activeTypeFilter  = 'all';
+let logPaused         = false;
+let lastNodes         = {};
+let lastLog           = [];
+let focusedSelectMac  = null;   // MAC of row whose ID dropdown is open
+let namingMac         = null;   // MAC of row whose name input is active
 
 function setRoleFilter(role) {
   activeRoleFilter = role;
@@ -611,6 +616,8 @@ function renderStats(gw, nodes) {
 
 function renderNodes(nodes) {
   lastNodes = nodes;
+  // Don't blow away the DOM while the user has a dropdown open or is typing a name
+  if (focusedSelectMac || namingMac) return;
   const tbody = document.getElementById('node-tbody');
   const q     = (document.getElementById('node-search').value || '').toLowerCase();
 
@@ -652,7 +659,10 @@ function renderNodes(nodes) {
     for (let i = 0; i <= 30; i++) {
       idOpts += '<option value="' + i + '"' + (i === n.device_id ? ' selected' : '') + '>' + i + '</option>';
     }
-    const idCell = '<td><select class="id-select" onchange="changeDeviceId(\'' + n.mac + '\',this)">' + idOpts + '</select></td>';
+    const idCell = '<td><select class="id-select" ' +
+      'onfocus="focusedSelectMac=\'' + n.mac + '\'" ' +
+      'onblur="focusedSelectMac=null" ' +
+      'onchange="changeDeviceId(\'' + n.mac + '\',this)">' + idOpts + '</select></td>';
 
     return '<tr>' +
       '<td><span class="dot-inline" style="background:' + n.color + ';color:' + n.color + '"></span>' + esc(n.label) + '</td>' +
