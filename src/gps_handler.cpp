@@ -48,7 +48,35 @@ bool GpsHandler::init() {
         return true;
     }
 
-    Serial.printf("[GPS] No GPS module detected (%d chars received)\n", charCount);
+    // -------------------------------------------------------------------------
+    // Not detected — give actionable diagnostic based on what we saw
+    // -------------------------------------------------------------------------
+    if (charCount == 0) {
+        // Zero bytes means our RX pin heard nothing at all.
+        // Most likely cause on a freshly-wired board: RX and TX are swapped.
+        Serial.println("[GPS] No data received (0 bytes in 5 s). Possible causes:");
+        Serial.printf("[GPS]   1) RX/TX wires swapped — ESP32 RX=%d TX=%d, try swapping the two wires\n",
+                      GPS_RX_PIN, GPS_TX_PIN);
+        Serial.println("[GPS]   2) GPS module not powered or 3.3 V rail missing");
+        Serial.printf("[GPS]   3) Wrong pin numbers in config.h (currently RX=%d TX=%d)\n",
+                      GPS_RX_PIN, GPS_TX_PIN);
+        Serial.printf("[GPS]   4) Baud rate mismatch (configured: %d) — try 4800 or 38400\n",
+                      GPS_BAUD);
+    } else {
+        // We got bytes but no recognisable NMEA '$GP'/'$GN'/'$GL' prefix.
+        // Usually a baud rate mismatch making everything garbled, or the
+        // module is in a binary (UBX) mode.  Show the raw chars so the user
+        // can see whether it looks like noise or a different protocol.
+        Serial.printf("[GPS] Got %d bytes but no NMEA sentences found. Possible causes:\n", charCount);
+        Serial.printf("[GPS]   1) Baud rate mismatch (configured: %d) — common alternatives: 4800, 38400, 115200\n",
+                      GPS_BAUD);
+        Serial.println("[GPS]   2) GPS module in binary/UBX mode — needs u-center factory reset");
+        Serial.println("[GPS]   3) RX/TX swapped and receiving own TX loopback (garbled data)");
+        if (buf.length() > 0) {
+            Serial.printf("[GPS]   Raw sample: \"%s\"\n", buf.substring(0, 80).c_str());
+        }
+    }
+
     _detected = false;
     return false;
 }
@@ -87,8 +115,29 @@ uint32_t GpsHandler::getUpdateIntervalMs() {
 
 void GpsHandler::printStatus() {
     Serial.println("[GPS] Status:");
-    Serial.printf("  Detected: %s\n", _detected ? "yes" : "no");
-    Serial.printf("  Fix valid: %s\n", hasValidFix() ? "yes" : "no");
+    Serial.printf("  Detected:         %s\n", _detected ? "yes" : "no");
+    Serial.printf("  Pins:             RX=%d  TX=%d  @ %d baud\n",
+                  GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+
+    // TinyGPS++ parser counters — key wiring/baud diagnostics
+    uint32_t chars    = _gps.charsProcessed();
+    uint32_t sentences = _gps.sentencesWithFix();
+    uint32_t failures  = _gps.failedChecksum();
+    Serial.printf("  Chars processed:  %lu\n", chars);
+    Serial.printf("  Sentences w/fix:  %lu\n", sentences);
+    Serial.printf("  Failed checksums: %lu\n", failures);
+
+    // Warn about likely wiring or baud issues
+    if (_detected && chars == 0) {
+        Serial.println("  *** WARNING: 0 chars since boot — GPS wires may have come loose");
+        Serial.printf( "  ***          Check RX/TX at pins %d/%d\n", GPS_RX_PIN, GPS_TX_PIN);
+    } else if (failures > 10 && failures > chars / 4) {
+        // More than 25 % checksum failures suggests data is garbled
+        Serial.printf("  *** WARNING: high checksum failure rate (%lu/%lu)\n", failures, chars);
+        Serial.printf("  ***          Check baud rate (configured: %d) or line noise\n", GPS_BAUD);
+    }
+
+    Serial.printf("  Fix valid:        %s\n", hasValidFix() ? "yes" : "no");
     if (hasValidFix()) {
         Serial.printf("  Lat: %.8f  Lon: %.8f\n", _gps.location.lat(), _gps.location.lng());
         Serial.printf("  Alt: %.1f m  Speed: %.1f m/s\n", _gps.altitude.meters(), _gps.speed.mps());
