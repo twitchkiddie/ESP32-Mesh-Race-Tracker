@@ -615,7 +615,7 @@ function renderPanel() {
         <span class="label full val">${fmtSpeed(node)}</span>
         <span class="label">Heading</span>
         <span class="val">${hdg}</span>
-        ${r && r.gap_fmt ? `
+        ${r && (r.status === 'racing' || r.status === 'finished') ? `
         <span class="label">Gap</span>
         <span class="val" style="color:${r.rank===1?'#3fb950':'var(--text)'}">${r.gap_fmt}</span>` : ''}
         <span class="label full" style="color:var(--text-dim);font-size:11px">

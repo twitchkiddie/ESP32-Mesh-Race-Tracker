@@ -206,7 +206,9 @@ class BoatRace:
             "distance_m":  round(self.distance_m, 1),
             "gap_m":       round(self.gap_m, 1),
             "gap_s":       round(self.gap_s, 1) if self.gap_s is not None else None,
-            "gap_fmt":     (f"+{_fmt_time(self.gap_s)}" if self.gap_s else "Leader"),
+            "gap_fmt":     ("—" if self.status not in (RACING, FINISHED)
+                            else f"+{_fmt_time(self.gap_s)}" if self.gap_s
+                            else "Leader"),
             "eta_s":       round(self.eta_s, 0) if self.eta_s is not None else None,
             "eta_fmt":     _fmt_time(self.eta_s),
         }

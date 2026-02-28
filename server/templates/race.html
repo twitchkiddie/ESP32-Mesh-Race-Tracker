@@ -621,10 +621,12 @@ function updateLeaderboard(data) {
         <div class="boat-name">${b.label}</div>
         <div class="boat-status st-${b.status}">${statusLabel(b.status)}</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <div class="boat-time">${b.elapsed_fmt}</div>
-        <div class="boat-gap ${b.gap_fmt==='Leader'?'leader':''}">${b.gap_fmt}</div>
-      </div>
+      ${(b.status === 'racing' || b.status === 'finished')
+        ? `<div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div class="boat-time">${b.elapsed_fmt}</div>
+          <div class="boat-gap ${b.gap_fmt==='Leader'?'leader':''}">${b.gap_fmt}</div>
+        </div>`
+        : ''}
       <div class="boat-meta">
         <div class="meta-item">ETA <span class="val">${b.eta_fmt}</span></div>
         <div class="meta-item">⚡ <span class="val">${spd} km/h</span></div>
