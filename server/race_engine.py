@@ -235,8 +235,9 @@ class RaceEngine:
         self._active_name:  str                    = ''
         self._courses:      Dict[str, Course]      = {}   # all saved courses
         self._boats:        Dict[str, BoatRace]    = {}
-        self._events:           list          = []    # [{id, name, tracker_macs}]
-        self._active_event_id:  Optional[str] = None
+        self._events:          list          = []    # [{id, name, heats:[{id,name,type,scheduled_time,tracker_macs,result}]}]
+        self._active_heat_id:  Optional[str] = None
+        self._result_recorded: bool          = False  # guard for auto-snapshot
 
     # ------------------------------------------------------------------
     # Course management
@@ -282,55 +283,129 @@ class RaceEngine:
                 self._boats.clear()
 
     # ---------------------------------------------------------------------------
-    # Event (heat/division) management
+    # Event + Heat management
     # ---------------------------------------------------------------------------
 
-    def list_events(self) -> list:
-        """Return all events with an 'active' flag added."""
-        with self._lock:
-            return [{**e, 'active': e['id'] == self._active_event_id}
-                    for e in self._events]
+    def _find_heat(self, heat_id: Optional[str]):
+        """Return (event_dict, heat_dict) or None. Must be called while holding self._lock."""
+        if not heat_id:
+            return None
+        for ev in self._events:
+            for h in ev.get('heats', []):
+                if h['id'] == heat_id:
+                    return (ev, h)
+        return None
 
-    def add_event(self, name: str, tracker_macs: list) -> dict:
-        """Create a new named event and return it."""
-        evt = {
-            'id':           uuid.uuid4().hex[:12],
-            'name':         name.strip(),
-            'tracker_macs': list(tracker_macs),
-        }
+    def list_events(self) -> list:
+        """Return all events with nested heats; each heat has an 'active' flag."""
         with self._lock:
-            self._events.append(evt)
-        return evt
+            return [
+                {**ev, 'heats': [
+                    {**h, 'active': h['id'] == self._active_heat_id}
+                    for h in ev.get('heats', [])
+                ]}
+                for ev in self._events
+            ]
+
+    def add_event(self, name: str) -> dict:
+        """Create a new event container (no heats yet)."""
+        ev = {'id': uuid.uuid4().hex[:12], 'name': name.strip(), 'heats': []}
+        with self._lock:
+            self._events.append(ev)
+        return ev
+
+    def update_event(self, event_id: str, name: str) -> bool:
+        """Rename an event.  Returns False if not found."""
+        with self._lock:
+            for ev in self._events:
+                if ev['id'] == event_id:
+                    ev['name'] = name.strip()
+                    return True
+        return False
 
     def remove_event(self, event_id: str) -> bool:
-        """Delete an event by id.  Clears active if it was the active one."""
+        """Delete an event and all its heats.  Clears active heat if it belonged here."""
         with self._lock:
+            pair = self._find_heat(self._active_heat_id)
+            if pair and pair[0]['id'] == event_id:
+                self._active_heat_id = None
+                self._result_recorded = False
             before = len(self._events)
             self._events = [e for e in self._events if e['id'] != event_id]
-            if self._active_event_id == event_id:
-                self._active_event_id = None
             return len(self._events) < before
 
-    def activate_event(self, event_id: str) -> bool:
-        """Set the active event.  Returns False if event_id not found."""
+    def add_heat(self, event_id: str, name: str, heat_type: str,
+                 tracker_macs: list, scheduled_time: str) -> Optional[dict]:
+        """Add a heat to an event.  Returns None if event not found."""
+        heat = {
+            'id':             uuid.uuid4().hex[:12],
+            'name':           name.strip() or 'Heat',
+            'type':           heat_type,
+            'scheduled_time': scheduled_time,
+            'tracker_macs':   list(tracker_macs),
+            'result':         None,
+        }
         with self._lock:
-            if not any(e['id'] == event_id for e in self._events):
+            for ev in self._events:
+                if ev['id'] == event_id:
+                    ev['heats'].append(heat)
+                    return heat
+        return None
+
+    def update_heat(self, heat_id: str, **kwargs) -> bool:
+        """Update allowed heat fields.  Returns False if not found."""
+        ALLOWED = {'name', 'type', 'scheduled_time', 'tracker_macs'}
+        with self._lock:
+            pair = self._find_heat(heat_id)
+            if not pair:
                 return False
-            self._active_event_id = event_id
+            _, heat = pair
+            for k, v in kwargs.items():
+                if k in ALLOWED:
+                    heat[k] = v
             return True
 
-    def clear_active_event(self):
-        """Remove the active event filter (all trackers become visible)."""
+    def remove_heat(self, heat_id: str) -> bool:
+        """Delete a heat.  Clears active_heat_id if it was this heat."""
         with self._lock:
-            self._active_event_id = None
+            for ev in self._events:
+                before = len(ev['heats'])
+                ev['heats'] = [h for h in ev['heats'] if h['id'] != heat_id]
+                if len(ev['heats']) < before:
+                    if self._active_heat_id == heat_id:
+                        self._active_heat_id = None
+                        self._result_recorded = False
+                    return True
+        return False
 
-    def get_active_event(self) -> Optional[dict]:
-        """Return a copy of the active event dict, or None."""
+    def activate_heat(self, heat_id: str) -> bool:
+        """Set the active heat.  Returns False if not found.  Resets result guard."""
         with self._lock:
-            for e in self._events:
-                if e['id'] == self._active_event_id:
-                    return dict(e)
-            return None
+            if not self._find_heat(heat_id):
+                return False
+            self._active_heat_id = heat_id
+            self._result_recorded = False
+            return True
+
+    def clear_active_heat(self):
+        """Remove the active heat filter (all trackers become visible)."""
+        with self._lock:
+            self._active_heat_id = None
+            self._result_recorded = False
+
+    def record_heat_result(self, heat_id: str, notes: str = '', times: dict = None) -> bool:
+        """Manually update/override a heat's result record."""
+        with self._lock:
+            pair = self._find_heat(heat_id)
+            if not pair:
+                return False
+            _, heat = pair
+            if heat['result'] is None:
+                heat['result'] = {'recorded_at': time.time(), 'finish_order': [], 'times': {}, 'notes': ''}
+            heat['result']['notes'] = notes
+            if times is not None:
+                heat['result']['times'].update(times)
+            return True
 
     # ---------------------------------------------------------------------------
 
@@ -339,8 +414,8 @@ class RaceEngine:
             data = {
                 'active':           self._active_name,
                 'courses':          {n: c.to_dict() for n, c in self._courses.items()},
-                'events':           self._events,
-                'active_event_id':  self._active_event_id,
+                'events':          self._events,
+                'active_heat_id':  self._active_heat_id,
             }
             Path(path).write_text(json.dumps(data, indent=2))
 
@@ -368,13 +443,39 @@ class RaceEngine:
                     self._course      = course
                     self._active_name = course.name
 
-                # Load events (new field — absent in old configs, default to []/None)
-                self._events          = list(d.get('events', []))
-                self._active_event_id = d.get('active_event_id', None)
-                # Validate: clear if stored id no longer exists in events list
-                known_ids = {e['id'] for e in self._events}
-                if self._active_event_id not in known_ids:
-                    self._active_event_id = None
+                # Load events with migration from Phase 1 flat format
+                raw_events = d.get('events', [])
+                migrated = []
+                for ev in raw_events:
+                    if 'tracker_macs' in ev and 'heats' not in ev:
+                        # Phase 1 event: wrap tracker_macs into a single default heat
+                        migrated.append({
+                            'id': ev['id'], 'name': ev['name'], 'heats': [{
+                                'id':             uuid.uuid4().hex[:12],
+                                'name':           'Race',
+                                'type':           'heat',
+                                'scheduled_time': '',
+                                'tracker_macs':   ev['tracker_macs'],
+                                'result':         None,
+                            }]
+                        })
+                    else:
+                        migrated.append(ev)
+                self._events = migrated
+
+                # Migrate old active_event_id → active_heat_id
+                self._active_heat_id = d.get('active_heat_id', None)
+                if self._active_heat_id is None:
+                    old_event_id = d.get('active_event_id')
+                    if old_event_id:
+                        for ev in self._events:
+                            if ev['id'] == old_event_id and ev.get('heats'):
+                                self._active_heat_id = ev['heats'][0]['id']
+                                break
+
+                # Validate: clear active_heat_id if it no longer exists
+                if not self._find_heat(self._active_heat_id):
+                    self._active_heat_id = None
             return True
         except Exception:
             return False
@@ -431,6 +532,26 @@ class RaceEngine:
                 boat._prev = curr
 
             self._rerank()
+
+            # Auto-record result snapshot (only once per activated heat)
+            if (not self._result_recorded and self._active_heat_id
+                    and len(self._boats) > 0
+                    and all(b.status in (FINISHED, DNF) for b in self._boats.values())):
+                pair = self._find_heat(self._active_heat_id)
+                if pair:
+                    _, heat = pair
+                    if heat['result'] is None:
+                        ranked = sorted(
+                            [(mac, b) for mac, b in self._boats.items() if b.status == FINISHED],
+                            key=lambda x: x[1].rank)
+                        dnf_macs = [mac for mac, b in self._boats.items() if b.status == DNF]
+                        heat['result'] = {
+                            'recorded_at':  time.time(),
+                            'finish_order': [mac for mac, _ in ranked] + dnf_macs,
+                            'times':        {mac: round(b.elapsed_s, 1) for mac, b in ranked},
+                            'notes':        '',
+                        }
+                self._result_recorded = True
 
     # ------------------------------------------------------------------
     # Internal: position logic
@@ -546,17 +667,20 @@ class RaceEngine:
             course     = self._course
             boats_out  = []
 
-            # Resolve active event and build an optional MAC filter
+            # Resolve active heat and its parent event; build optional MAC filter
             active_event = None
+            active_heat  = None
             event_macs   = None
-            if self._active_event_id:
-                for e in self._events:
-                    if e['id'] == self._active_event_id:
-                        active_event = dict(e)
-                        event_macs   = set(e['tracker_macs'])
-                        break
+            if self._active_heat_id:
+                pair = self._find_heat(self._active_heat_id)
+                if pair:
+                    ev, heat = pair
+                    active_event = {'id': ev['id'], 'name': ev['name']}
+                    active_heat  = dict(heat)   # includes tracker_macs for spectator filter
+                    if heat['tracker_macs']:
+                        event_macs = set(heat['tracker_macs'])
 
-            # When event is active, restrict the working node dict to event members
+            # When a heat is active, restrict the working node dict to its members
             if event_macs is not None:
                 nodes = {mac: n for mac, n in nodes.items() if mac in event_macs}
 
@@ -636,5 +760,6 @@ class RaceEngine:
                 "race_active":   active,
                 "race_finished": finished,
                 "timestamp":     time.time(),
-                "active_event":  active_event,   # None or {id, name, tracker_macs}
+                "active_event":  active_event,   # None or {id, name}
+                "active_heat":   active_heat,    # None or full heat dict {id,name,type,scheduled_time,tracker_macs,result}
             }

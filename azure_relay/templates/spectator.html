@@ -258,6 +258,11 @@ const GMAPS_KEY = '{{ gmaps_key }}';
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+const HEAT_TYPE_LABELS = {
+  heat: 'Heat', semi_final: 'Semi-Final', final: 'Final',
+  time_trial: 'Time Trial', repechage: 'Repechage', exhibition: 'Exhibition'
+};
+
 let nodes      = {};
 let cloudStale = true;
 let cloudAgeS  = null;
@@ -542,9 +547,15 @@ function renderPanel() {
   // Panel title + event subtitle
   if (titleEl) titleEl.textContent = raceActive ? 'Race Standings' : 'Live Boats';
   if (subtitleEl) {
-    const evtName = raceState && raceState.active_event && raceState.active_event.name;
-    subtitleEl.textContent = evtName || '';
-    subtitleEl.style.display = evtName ? '' : 'none';
+    const heatName = raceState && raceState.active_heat && raceState.active_heat.name;
+    const heatType = raceState && raceState.active_heat && raceState.active_heat.type;
+    let subtitle = '';
+    if (heatName) {
+      const typeLabel = HEAT_TYPE_LABELS[heatType] || heatType;
+      subtitle = (heatType && heatType !== 'heat') ? `${heatName} (${typeLabel})` : heatName;
+    }
+    subtitleEl.textContent = subtitle;
+    subtitleEl.style.display = subtitle ? '' : 'none';
   }
 
   // Build display list
@@ -632,12 +643,16 @@ function panFocusNode(mac) {
 // Header / stale banner
 // ---------------------------------------------------------------------------
 function updateHeader(prevStale) {
-  // Show active event name in header subtitle
+  // Show active event + heat name in header subtitle
   const sub = document.getElementById('hdr-subtitle');
   if (sub) {
-    sub.textContent = (raceState && raceState.active_event && raceState.active_event.name)
-      ? raceState.active_event.name
-      : 'Live View ☁';
+    let txt = 'Live View ☁';
+    if (raceState && raceState.active_event && raceState.active_event.name) {
+      txt = raceState.active_event.name;
+      if (raceState.active_heat && raceState.active_heat.name)
+        txt += ' · ' + raceState.active_heat.name;
+    }
+    sub.textContent = txt;
   }
 
   const badge = document.getElementById('cloud-badge');
@@ -690,12 +705,12 @@ async function poll() {
     cloudStale = data.cloud_stale !== false;   // default true if missing
     raceState  = data.race || null;
 
-    // When an event is active, restrict visible nodes to that event's MACs only.
-    if (raceState && raceState.active_event &&
-        Array.isArray(raceState.active_event.tracker_macs) &&
-        raceState.active_event.tracker_macs.length > 0) {
-      const eventMacs = new Set(raceState.active_event.tracker_macs);
-      nodes = Object.fromEntries(Object.entries(nodes).filter(([mac]) => eventMacs.has(mac)));
+    // When a heat is active, restrict visible nodes to that heat's MACs only.
+    if (raceState && raceState.active_heat &&
+        Array.isArray(raceState.active_heat.tracker_macs) &&
+        raceState.active_heat.tracker_macs.length > 0) {
+      const heatMacs = new Set(raceState.active_heat.tracker_macs);
+      nodes = Object.fromEntries(Object.entries(nodes).filter(([mac]) => heatMacs.has(mac)));
     }
 
     // Sync start/finish course lines onto map

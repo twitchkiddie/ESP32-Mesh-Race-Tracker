@@ -187,7 +187,7 @@ def api_race_reset():
 
 
 # ---------------------------------------------------------------------------
-# Event (heat / division) routes
+# Event + Heat routes
 # ---------------------------------------------------------------------------
 
 @app.route('/api/race/events', methods=['GET'])
@@ -201,29 +201,88 @@ def api_race_events_add():
     name = str(data.get('name', '')).strip()
     if not name:
         return jsonify({'error': 'name is required'}), 400
-    evt = engine.add_event(name, data.get('tracker_macs', []))
+    ev = engine.add_event(name)
     engine.save_config(_config_path)
-    return jsonify({'ok': True, 'event': evt}), 201
+    return jsonify({'ok': True, 'event': ev}), 201
 
 
-# IMPORTANT: this literal route must be registered BEFORE the parameterized
-# /<event_id> route below so Flask does not treat "active" as an event id.
-@app.route('/api/race/events/active', methods=['POST'])
-def api_race_events_set_active():
-    data     = request.get_json(silent=True) or {}
-    event_id = data.get('event_id')          # None = clear active event
-    if event_id is None:
-        engine.clear_active_event()
-    elif not engine.activate_event(event_id):
+@app.route('/api/race/events/<string:event_id>', methods=['PUT'])
+def api_race_events_update(event_id):
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    if not engine.update_event(event_id, name):
         return jsonify({'error': 'Event not found'}), 404
     engine.save_config(_config_path)
-    return jsonify({'ok': True, 'active_event_id': event_id})
+    return jsonify({'ok': True})
 
 
 @app.route('/api/race/events/<string:event_id>', methods=['DELETE'])
 def api_race_events_delete(event_id):
     if not engine.remove_event(event_id):
         return jsonify({'error': 'Event not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/race/events/<string:event_id>/heats', methods=['POST'])
+def api_race_heats_add(event_id):
+    data = request.get_json(silent=True) or {}
+    heat = engine.add_heat(
+        event_id,
+        str(data.get('name', 'Heat')),
+        data.get('type', 'heat'),
+        data.get('tracker_macs', []),
+        data.get('scheduled_time', ''),
+    )
+    if heat is None:
+        return jsonify({'error': 'Event not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True, 'heat': heat}), 201
+
+
+# IMPORTANT: literal 'active' route BEFORE parameterized /<heat_id>
+@app.route('/api/race/heats/active', methods=['POST'])
+def api_race_heats_set_active():
+    data    = request.get_json(silent=True) or {}
+    heat_id = data.get('heat_id')   # None = clear
+    if heat_id is None:
+        engine.clear_active_heat()
+    elif not engine.activate_heat(heat_id):
+        return jsonify({'error': 'Heat not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True, 'active_heat_id': heat_id})
+
+
+@app.route('/api/race/heats/<string:heat_id>', methods=['PUT'])
+def api_race_heats_update(heat_id):
+    data = request.get_json(silent=True) or {}
+    kwargs = {k: v for k, v in {
+        'name':           str(data['name']).strip() if 'name' in data else None,
+        'type':           data.get('type'),
+        'scheduled_time': data.get('scheduled_time'),
+        'tracker_macs':   data.get('tracker_macs'),
+    }.items() if v is not None}
+    if not engine.update_heat(heat_id, **kwargs):
+        return jsonify({'error': 'Heat not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/race/heats/<string:heat_id>', methods=['DELETE'])
+def api_race_heats_delete(heat_id):
+    if not engine.remove_heat(heat_id):
+        return jsonify({'error': 'Heat not found'}), 404
+    engine.save_config(_config_path)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/race/heats/<string:heat_id>/result', methods=['PUT'])
+def api_race_heats_result(heat_id):
+    data = request.get_json(silent=True) or {}
+    if not engine.record_heat_result(heat_id, notes=data.get('notes', ''), times=data.get('times')):
+        return jsonify({'error': 'Heat not found'}), 404
     engine.save_config(_config_path)
     return jsonify({'ok': True})
 

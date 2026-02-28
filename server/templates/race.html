@@ -74,15 +74,6 @@
     font-size: 0.8rem; font-weight: 600; color: #8b949e;
     text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
   }
-  .event-row {
-    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-    border: 1px solid #30363d; border-radius: 8px; margin-bottom: 6px;
-    background: #0d1117;
-  }
-  .event-row.active-event { border-color: #3fb950; background: #0d1f0d; }
-  .event-name  { flex: 1; font-size: 0.88rem; font-weight: 600; color: #e6edf3;
-                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .event-macs  { font-size: 0.75rem; color: #8b949e; white-space: nowrap; }
   .event-active-badge {
     padding: 2px 7px; border-radius: 8px; font-size: 0.72rem; font-weight: 700;
     text-transform: uppercase; background: #1a4721; color: #3fb950;
@@ -96,27 +87,69 @@
   .event-btn:hover  { background: #30363d; }
   .event-btn.danger { color: #f85149; }
   .event-btn.danger:hover { background: #3d1a1a; border-color: #f85149; }
-  #event-add-form {
-    display: none; flex-direction: column; gap: 8px;
-    margin-top: 8px; padding: 10px; border: 1px dashed #30363d; border-radius: 8px;
+  /* Modal overlay */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 1000; align-items: center; justify-content: center;
   }
-  #event-add-form.visible { display: flex; }
-  #event-name-input {
-    padding: 5px 9px; background: #21262d; border: 1px solid #30363d;
-    border-radius: 6px; color: #e6edf3; font-size: 0.85rem; width: 100%;
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 20px; min-width: 320px; max-width: 480px; width: 90%; display: flex;
+    flex-direction: column; gap: 12px;
   }
+  .modal-title { font-size: 0.95rem; font-weight: 700; color: #e6edf3; }
+  .modal-field { display: flex; flex-direction: column; gap: 4px; }
+  .modal-field label { font-size: 0.78rem; color: #8b949e; }
+  .modal-field input, .modal-field select {
+    padding: 6px 10px; background: #21262d; border: 1px solid #30363d;
+    border-radius: 6px; color: #e6edf3; font-size: 0.85rem;
+  }
+  .modal-field input[type="time"] { width: auto; }
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .modal-btn-primary {
+    padding: 5px 16px; border-radius: 6px; border: 1px solid #3fb950;
+    background: #1a4721; color: #3fb950; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+  }
+  .modal-btn-primary:hover { background: #238636; }
+  .modal-btn-cancel {
+    padding: 5px 12px; border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.85rem;
+  }
+  /* Event groups with nested heats */
+  .event-group { margin-bottom: 10px; }
+  .event-group-header {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: #1c2128; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 4px;
+  }
+  .event-group-name {
+    flex: 1; font-size: 0.88rem; font-weight: 700; color: #e6edf3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .heat-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 22px;
+    border: 1px solid #21262d; border-radius: 6px; margin-bottom: 3px; background: #0d1117;
+  }
+  .heat-row.active-heat { border-color: #3fb950; background: #0d1f0d; }
+  .heat-name { flex: 1; font-size: 0.84rem; font-weight: 600; color: #e6edf3; }
+  .heat-type-badge {
+    font-size: 0.70rem; text-transform: uppercase; color: #8b949e;
+    border: 1px solid #30363d; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;
+  }
+  .heat-time { font-size: 0.75rem; color: #8b949e; white-space: nowrap; flex-shrink: 0; }
+  .heat-trackers { font-size: 0.72rem; color: #8b949e; white-space: nowrap; flex-shrink: 0; }
+  .result-badge {
+    font-size: 0.70rem; padding: 1px 6px; border-radius: 4px;
+    background: #1a3a5c; color: #58a6ff; border: 1px solid #1f6feb; flex-shrink: 0;
+  }
+  .heat-empty { font-size: 0.78rem; color: #484f58; padding: 4px 22px; font-style: italic; }
+  /* Tracker checkboxes (reused in modal) */
   .tracker-checkboxes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
   .tracker-cb-label {
     display: flex; align-items: center; gap: 5px;
     font-size: 0.82rem; color: #c9d1d9; cursor: pointer;
   }
   .tracker-cb-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .event-form-btns { display: flex; gap: 8px; margin-top: 2px; }
-  #btn-save-event {
-    padding: 5px 14px; border-radius: 6px; border: 1px solid #3fb950;
-    background: #1a4721; color: #3fb950; cursor: pointer; font-size: 0.82rem; font-weight: 600;
-  }
-  #btn-save-event:hover { background: #238636; }
 
   /* Main area */
   #main { display: flex; flex: 1; overflow: hidden; }
@@ -280,21 +313,61 @@
   <div id="events-panel">
     <h3>Events / Heats</h3>
     <div id="events-list"><!-- filled by JS --></div>
+    <button class="event-btn" onclick="openNewEventModal()"
+            style="margin-top:8px;align-self:flex-start">+ New Event</button>
+  </div>
 
-    <!-- New-event form (hidden until + New Event clicked) -->
-    <div id="event-add-form">
-      <label style="color:#8b949e;font-size:0.8rem">Event Name</label>
-      <input id="event-name-input" type="text" placeholder="e.g. Men's 1x – Heat 1">
-      <label style="color:#8b949e;font-size:0.8rem">Assign Trackers</label>
-      <div class="tracker-checkboxes" id="tracker-checkboxes"></div>
-      <div class="event-form-btns">
-        <button id="btn-save-event" onclick="saveEvent()">Save Event</button>
-        <button class="event-btn" onclick="cancelEventForm()">Cancel</button>
+  <!-- Event modal (create / edit) -->
+  <div class="modal-overlay" id="modal-event" onclick="if(event.target===this)closeModal('modal-event')">
+    <div class="modal-box">
+      <div class="modal-title" id="modal-event-title">New Event</div>
+      <div class="modal-field">
+        <label>Event / Class Name</label>
+        <input id="modal-event-name" type="text" placeholder="e.g. Men's 1x">
+      </div>
+      <div class="modal-btns">
+        <button class="modal-btn-cancel" onclick="closeModal('modal-event')">Cancel</button>
+        <button class="modal-btn-primary" onclick="saveEventModal()">Save</button>
       </div>
     </div>
+  </div>
 
-    <button class="event-btn" onclick="showEventForm()"
-            style="margin-top:8px;align-self:flex-start">+ New Event</button>
+  <!-- Heat modal (create / edit) -->
+  <div class="modal-overlay" id="modal-heat" onclick="if(event.target===this)closeModal('modal-heat')">
+    <div class="modal-box">
+      <div class="modal-title" id="modal-heat-title">New Heat</div>
+      <div class="modal-field">
+        <label>Heat Name</label>
+        <input id="modal-heat-name" type="text" placeholder="e.g. Heat 1">
+      </div>
+      <div style="display:flex;gap:10px">
+        <div class="modal-field" style="flex:1">
+          <label>Type</label>
+          <select id="modal-heat-type">
+            <option value="heat">Heat</option>
+            <option value="semi_final">Semi-Final</option>
+            <option value="final">Final</option>
+            <option value="time_trial">Time Trial</option>
+            <option value="repechage">Repechage</option>
+            <option value="exhibition">Exhibition</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Scheduled Time</label>
+          <input id="modal-heat-time" type="time">
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Assign Trackers</label>
+        <div class="tracker-checkboxes" id="modal-heat-trackers">
+          <span style="color:#8b949e;font-size:0.8rem">Loading…</span>
+        </div>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-btn-cancel" onclick="closeModal('modal-heat')">Cancel</button>
+        <button class="modal-btn-primary" onclick="saveHeatModal()">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── Main content ────────────────────────────────────────────── -->
@@ -376,6 +449,9 @@ let raceStartTime    = null;
 let editorMode       = false;
 let eventsMode       = false;
 let eventsData       = [];   // cache of GET /api/race/events
+let _editingEventId  = null; // null = creating new
+let _editingHeatId   = null; // null = creating new
+let _newHeatEventId  = null; // parent event id when creating a new heat
 let activeTool       = null;
 
 // Editor draft course
@@ -442,10 +518,12 @@ function updateHeader(data) {
     sb.textContent = 'Pre-Race'; sb.className = 'status-pre';
   }
 
-  // Active event badge
+  // Active heat badge (shows "Event · Heat" in header)
   const badge = document.getElementById('active-event-badge');
-  if (data.active_event && data.active_event.name) {
-    badge.textContent = data.active_event.name;
+  if (data.active_heat) {
+    const evtName  = data.active_event ? data.active_event.name : '';
+    const heatName = data.active_heat.name;
+    badge.textContent = evtName ? `${evtName} · ${heatName}` : heatName;
     badge.style.display = 'inline-block';
   } else {
     badge.style.display = 'none';
@@ -758,6 +836,11 @@ async function dnfBoat(mac) {
 // Events panel
 // ═══════════════════════════════════════════════════════════════════════════
 
+const HEAT_TYPE_LABELS = {
+  heat: 'Heat', semi_final: 'Semi-Final', final: 'Final',
+  time_trial: 'Time Trial', repechage: 'Repechage', exhibition: 'Exhibition'
+};
+
 function toggleEventsPanel() {
   eventsMode = !eventsMode;
   const btn   = document.getElementById('btn-events');
@@ -782,113 +865,200 @@ function escapeHtml(s) {
 
 function renderEventsList() {
   const container = document.getElementById('events-list');
+  const macToLabel = {};
+  if (lastData && lastData.boats) lastData.boats.forEach(b => { macToLabel[b.mac] = b.label; });
+
   if (!eventsData.length) {
-    container.innerHTML =
-      '<div style="color:#8b949e;font-size:0.82rem;padding:4px 0">No events defined yet.</div>';
+    container.innerHTML = '<div style="color:#8b949e;font-size:0.82rem;padding:4px 0">No events defined. Click + New Event to start.</div>';
     return;
   }
-  // Build mac → label map from last known boats
-  const macToLabel = {};
-  if (lastData && lastData.boats) {
-    lastData.boats.forEach(b => { macToLabel[b.mac] = b.label; });
-  }
+
   container.innerHTML = eventsData.map(ev => {
-    const isActive = ev.active;
-    const trackerLabels = (ev.tracker_macs || [])
-      .map(mac => macToLabel[mac] || mac.slice(-5))
-      .join(', ');
+    const heatsHtml = (ev.heats && ev.heats.length > 0)
+      ? ev.heats.map(h => {
+          const isActive = h.active;
+          const trackerStr = (h.tracker_macs || []).map(m => macToLabel[m] || m.slice(-5)).join(', ');
+          const resultMark = h.result ? '<span class="result-badge">Result</span>' : '';
+          return `
+          <div class="heat-row${isActive ? ' active-heat' : ''}">
+            <div style="flex:1;min-width:0">
+              <div class="heat-name">${escapeHtml(h.name)}</div>
+              <div class="heat-trackers">${trackerStr || 'No trackers'}</div>
+            </div>
+            <span class="heat-type-badge">${HEAT_TYPE_LABELS[h.type] || h.type}</span>
+            ${h.scheduled_time ? `<span class="heat-time">${escapeHtml(h.scheduled_time)}</span>` : ''}
+            ${resultMark}
+            ${isActive ? '<span class="event-active-badge">Active</span>' : ''}
+            ${isActive
+              ? `<button class="event-btn" onclick="clearActiveHeat()">Clear</button>`
+              : `<button class="event-btn" onclick="activateHeat('${h.id}')">Activate</button>`}
+            <button class="event-btn" onclick="openEditHeatModal('${h.id}')" title="Edit">✏</button>
+            <button class="event-btn danger" onclick="deleteHeat('${h.id}')" title="Delete">🗑</button>
+          </div>`;
+        }).join('')
+      : '<div class="heat-empty">No heats — click + Heat to add one.</div>';
+
     return `
-    <div class="event-row${isActive ? ' active-event' : ''}">
-      <div style="flex:1;min-width:0">
-        <div class="event-name">${escapeHtml(ev.name)}</div>
-        <div class="event-macs">${trackerLabels || 'No trackers assigned'}</div>
+    <div class="event-group">
+      <div class="event-group-header">
+        <span class="event-group-name">${escapeHtml(ev.name)}</span>
+        <button class="event-btn" onclick="openNewHeatModal('${ev.id}')">+ Heat</button>
+        <button class="event-btn" onclick="openEditEventModal('${ev.id}','${escapeHtml(ev.name)}')">✏</button>
+        <button class="event-btn danger" onclick="deleteEvent('${ev.id}')">🗑</button>
       </div>
-      ${isActive
-        ? '<span class="event-active-badge">Active</span>'
-        : `<button class="event-btn" onclick="activateEvent('${ev.id}')">Activate</button>`}
-      ${isActive
-        ? `<button class="event-btn" onclick="clearActiveEvent()">Clear</button>`
-        : ''}
-      <button class="event-btn danger" onclick="deleteEvent('${ev.id}')" title="Delete">🗑</button>
+      ${heatsHtml}
     </div>`;
   }).join('');
 }
 
-async function activateEvent(eventId) {
-  await fetch('/api/race/events/active', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ event_id: eventId }),
+// ─── Activate / clear ────────────────────────────────────────────────────
+
+async function activateHeat(heatId) {
+  await fetch('/api/race/heats/active', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({heat_id: heatId}),
   });
-  await refreshEvents();
-  fetchRace();
+  await refreshEvents(); fetchRace();
 }
 
-async function clearActiveEvent() {
-  await fetch('/api/race/events/active', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ event_id: null }),
+async function clearActiveHeat() {
+  await fetch('/api/race/heats/active', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({heat_id: null}),
   });
-  await refreshEvents();
-  fetchRace();
+  await refreshEvents(); fetchRace();
 }
+
+// ─── Delete ───────────────────────────────────────────────────────────────
 
 async function deleteEvent(eventId) {
   const ev = eventsData.find(e => e.id === eventId);
-  if (!confirm(`Delete event "${ev ? ev.name : eventId}"?`)) return;
-  await fetch('/api/race/events/' + eventId, { method: 'DELETE' });
-  await refreshEvents();
-  fetchRace();
+  if (!confirm(`Delete event "${ev ? ev.name : eventId}" and all its heats?`)) return;
+  await fetch('/api/race/events/' + eventId, {method: 'DELETE'});
+  await refreshEvents(); fetchRace();
 }
 
-async function showEventForm() {
-  const cbDiv = document.getElementById('tracker-checkboxes');
-  cbDiv.innerHTML = '<span style="color:#8b949e;font-size:0.8rem">Loading…</span>';
-  document.getElementById('event-add-form').classList.add('visible');
+async function deleteHeat(heatId) {
+  let heatName = heatId;
+  for (const ev of eventsData) { const h = ev.heats && ev.heats.find(h => h.id === heatId); if (h) { heatName = h.name; break; } }
+  if (!confirm(`Delete heat "${heatName}"?`)) return;
+  await fetch('/api/race/heats/' + heatId, {method: 'DELETE'});
+  await refreshEvents(); fetchRace();
+}
+
+// ─── Event modal ─────────────────────────────────────────────────────────
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+function openNewEventModal() {
+  _editingEventId = null;
+  document.getElementById('modal-event-title').textContent = 'New Event';
+  document.getElementById('modal-event-name').value = '';
+  document.getElementById('modal-event').classList.add('open');
+  setTimeout(() => document.getElementById('modal-event-name').focus(), 50);
+}
+
+function openEditEventModal(id, name) {
+  _editingEventId = id;
+  document.getElementById('modal-event-title').textContent = 'Edit Event';
+  document.getElementById('modal-event-name').value = name;
+  document.getElementById('modal-event').classList.add('open');
+  setTimeout(() => document.getElementById('modal-event-name').focus(), 50);
+}
+
+async function saveEventModal() {
+  const name = document.getElementById('modal-event-name').value.trim();
+  if (!name) { alert('Enter an event name.'); return; }
+  if (_editingEventId) {
+    await fetch('/api/race/events/' + _editingEventId, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+  } else {
+    await fetch('/api/race/events', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+  }
+  closeModal('modal-event');
+  await refreshEvents();
+}
+
+// ─── Heat modal ───────────────────────────────────────────────────────────
+
+async function openNewHeatModal(eventId) {
+  _editingHeatId  = null;
+  _newHeatEventId = eventId;
+  document.getElementById('modal-heat-title').textContent = 'New Heat';
+  document.getElementById('modal-heat-name').value = '';
+  document.getElementById('modal-heat-type').value = 'heat';
+  document.getElementById('modal-heat-time').value = '';
+  await _populateTrackerCheckboxes([]);
+  document.getElementById('modal-heat').classList.add('open');
+  setTimeout(() => document.getElementById('modal-heat-name').focus(), 50);
+}
+
+async function openEditHeatModal(heatId) {
+  _editingHeatId  = heatId;
+  _newHeatEventId = null;
+  let heat = null;
+  for (const ev of eventsData) { heat = ev.heats && ev.heats.find(h => h.id === heatId); if (heat) break; }
+  if (!heat) return;
+  document.getElementById('modal-heat-title').textContent = 'Edit Heat';
+  document.getElementById('modal-heat-name').value = heat.name;
+  document.getElementById('modal-heat-type').value = heat.type || 'heat';
+  document.getElementById('modal-heat-time').value = heat.scheduled_time || '';
+  await _populateTrackerCheckboxes(heat.tracker_macs || []);
+  document.getElementById('modal-heat').classList.add('open');
+  setTimeout(() => document.getElementById('modal-heat-name').focus(), 50);
+}
+
+async function _populateTrackerCheckboxes(selectedMacs) {
+  const div = document.getElementById('modal-heat-trackers');
+  div.innerHTML = '<span style="color:#8b949e;font-size:0.8rem">Loading…</span>';
   try {
     const r = await fetch('/api/state');
     const state = await r.json();
     const trackers = Object.values(state.nodes || {}).filter(n => n.role === 0);
-    if (trackers.length === 0) {
-      cbDiv.innerHTML = '<span style="color:#8b949e;font-size:0.8rem">No trackers online.</span>';
-    } else {
-      cbDiv.innerHTML = trackers.map(t => {
-        const label = t.display_name || t.label || t.mac.slice(-5);
-        return `<label class="tracker-cb-label">
-          <input type="checkbox" name="tracker-mac" value="${t.mac}">
-          <span class="tracker-cb-dot" style="background:${t.color}"></span>
-          ${escapeHtml(label)}
-        </label>`;
-      }).join('');
+    if (!trackers.length) {
+      div.innerHTML = '<span style="color:#8b949e;font-size:0.8rem">No trackers online.</span>';
+      return;
     }
+    div.innerHTML = trackers.map(t => {
+      const label = t.display_name || t.label || t.mac.slice(-5);
+      const checked = selectedMacs.includes(t.mac) ? 'checked' : '';
+      return `<label class="tracker-cb-label">
+        <input type="checkbox" name="modal-tracker-mac" value="${t.mac}" ${checked}>
+        <span class="tracker-cb-dot" style="background:${t.color}"></span>
+        ${escapeHtml(label)}
+      </label>`;
+    }).join('');
   } catch(e) {
-    cbDiv.innerHTML = '<span style="color:#f85149;font-size:0.8rem">Could not load tracker list.</span>';
+    div.innerHTML = '<span style="color:#f85149;font-size:0.8rem">Could not load trackers.</span>';
   }
 }
 
-function cancelEventForm() {
-  document.getElementById('event-add-form').classList.remove('visible');
-  document.getElementById('event-name-input').value = '';
-}
-
-async function saveEvent() {
-  const name = document.getElementById('event-name-input').value.trim();
-  if (!name) { alert('Enter an event name.'); return; }
-  const macs = [...document.querySelectorAll('input[name="tracker-mac"]:checked')]
-               .map(cb => cb.value);
-  const r = await fetch('/api/race/events', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, tracker_macs: macs }),
-  });
-  const j = await r.json();
-  if (j.ok) {
-    cancelEventForm();
-    await refreshEvents();
+async function saveHeatModal() {
+  const name    = document.getElementById('modal-heat-name').value.trim() || 'Heat';
+  const type    = document.getElementById('modal-heat-type').value;
+  const stime   = document.getElementById('modal-heat-time').value;
+  const macs    = [...document.querySelectorAll('input[name="modal-tracker-mac"]:checked')].map(c => c.value);
+  const payload = {name, type, scheduled_time: stime, tracker_macs: macs};
+  if (_editingHeatId) {
+    await fetch('/api/race/heats/' + _editingHeatId, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
   } else {
-    alert('Error: ' + (j.error || 'unknown'));
+    await fetch('/api/race/events/' + _newHeatEventId + '/heats', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
   }
+  closeModal('modal-heat');
+  await refreshEvents();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
